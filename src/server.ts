@@ -68,7 +68,8 @@ function selectedIds(value: unknown): number[] {
 }
 
 function turnstileToken(req: Request): string {
-  return String(req.body['cf-turnstile-response'] || req.body.turnstileToken || '');
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  return String(body['cf-turnstile-response'] || body.turnstileToken || '');
 }
 
 app.get('/', (_req, res) => {
