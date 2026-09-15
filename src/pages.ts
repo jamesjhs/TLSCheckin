@@ -77,7 +77,7 @@ function token() {
 }
 function initTurnstile() {
   if (!turnstileConfig.enabled) return;
-  if (!window.turnstile) { setTimeout(initTurnstile, 100); return; }
+  if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
   widgetId = window.turnstile.render('#turnstile', {
     sitekey: turnstileConfig.siteKey,
     theme: 'light',
@@ -136,7 +136,7 @@ export function adminLoginPage(adminPath: string, error = ''): string {
 const turnstileConfig = ${JSON.stringify(turnstile)};
 function initTurnstile() {
   if (!turnstileConfig.enabled) return;
-  if (!window.turnstile) { setTimeout(initTurnstile, 100); return; }
+  if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
   window.turnstile.render('#turnstile', {
     sitekey: turnstileConfig.siteKey,
     theme: 'light',
