@@ -57,7 +57,8 @@ export function publicHomePage(): string {
   return basePage('TLSCheckin', `
 <main class="center">
   <form id="checkin-form" class="stack" autocomplete="off">
-    <input id="code" class="textbox" name="code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Check-in code">
+    <input id="user" class="textbox" name="user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="User" aria-label="User">
+    <input id="secret" class="textbox" name="secret" type="text" autocomplete="off" inputmode="numeric" placeholder="Secret" aria-label="Secret">
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="checkin" data-theme="light" data-callback="onCheckinTurnstileSuccess" data-expired-callback="onCheckinTurnstileExpired" data-error-callback="onCheckinTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="status">${turnstile.enabled ? 'Waiting for Turnstile.' : ''}</div>
@@ -98,7 +99,9 @@ form.addEventListener('submit', async (event) => {
     statusBox.textContent = 'Complete Turnstile to continue.';
     return;
   }
-  const code = document.getElementById('code').value;
+  const user = document.getElementById('user').value.trim();
+  const secret = document.getElementById('secret').value.trim();
+  const code = secret + '-' + user;
   const response = await fetch('/api/checkin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
