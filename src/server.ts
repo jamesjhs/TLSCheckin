@@ -3,11 +3,11 @@ import session from 'express-session';
 import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import { config } from './config.js';
-import { initDb, getAdmin, recordAudit, findUserByIdentity, updateLastSeen, getFollowedUsers, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb } from './db.js';
+import { initDb, getAdmin, recordAudit, findUserByIdentity, updateLastSeen, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
-import { adminLoginPage, adminPage, formatFollowedLine, passwordChangePage, publicHomePage, resultPage } from './pages.js';
+import { adminLoginPage, adminPage, formatFollowedStatusLine, passwordChangePage, publicHomePage, resultPage } from './pages.js';
 
 const app = express();
 
@@ -118,10 +118,12 @@ app.post('/api/checkin', publicLimiter, async (req, res) => {
     return;
   }
 
+  const previousLastSeenAt = user.last_seen_at;
   updateLastSeen(user.id);
   recordAudit('public_checkin_success', { user: user.identity }, ip);
-  const followed = getFollowedUsers(user.id);
-  const lines = followed.length ? followed.map(formatFollowedLine) : ['Login noted'];
+  const followed = getFollowedUserStatuses(user.id);
+  const lines = followed.length ? followed.map((followedUser) => formatFollowedStatusLine(followedUser, previousLastSeenAt)) : ['Login noted'];
+  recordStatusViews(user.id, followed);
   res.json({ html: resultPage(lines) });
 });
 

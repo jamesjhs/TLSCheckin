@@ -17,6 +17,11 @@ export type UserRow = {
   updated_at: number;
 };
 
+export type FollowedUserStatusRow = UserRow & {
+  viewer_seen_at: number | null;
+  subject_seen_at: number | null;
+};
+
 export type AdminRow = {
   id: number;
   username: string;
@@ -69,6 +74,17 @@ export async function initDb(): Promise<void> {
       CHECK (follower_id <> followed_id),
       FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS status_views (
+      viewer_id INTEGER NOT NULL,
+      subject_id INTEGER NOT NULL,
+      subject_seen_at INTEGER NOT NULL,
+      viewed_at INTEGER NOT NULL,
+      PRIMARY KEY (viewer_id, subject_id),
+      CHECK (viewer_id <> subject_id),
+      FOREIGN KEY (viewer_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (subject_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS audit_events (
@@ -153,6 +169,25 @@ export function getFollowedUsers(followerId: number): UserRow[] {
   `).all(followerId) as UserRow[];
 }
 
+export function getFollowedUserStatuses(followerId: number): FollowedUserStatusRow[] {
+  return getDb().prepare(`
+    SELECT
+      u.*,
+      viewer_status.subject_seen_at AS viewer_seen_at,
+      subject_status.subject_seen_at AS subject_seen_at
+    FROM follows f
+    JOIN users u ON u.id = f.followed_id
+    LEFT JOIN status_views viewer_status
+      ON viewer_status.viewer_id = ?
+      AND viewer_status.subject_id = u.id
+    LEFT JOIN status_views subject_status
+      ON subject_status.viewer_id = u.id
+      AND subject_status.subject_id = ?
+    WHERE f.follower_id = ?
+    ORDER BY LOWER(u.identity)
+  `).all(followerId, followerId, followerId) as FollowedUserStatusRow[];
+}
+
 export function getFollowedIds(followerId: number): number[] {
   const rows = getDb().prepare('SELECT followed_id FROM follows WHERE follower_id = ? ORDER BY followed_id').all(followerId) as { followed_id: number }[];
   return rows.map((row) => row.followed_id);
@@ -162,6 +197,24 @@ export function updateLastSeen(userId: number): number {
   const ts = nowMs();
   getDb().prepare('UPDATE users SET last_seen_at = ?, updated_at = ? WHERE id = ?').run(ts, ts, userId);
   return ts;
+}
+
+export function recordStatusViews(viewerId: number, subjects: UserRow[]): void {
+  const viewableSubjects = subjects.filter((subject) => subject.id !== viewerId && subject.last_seen_at !== null);
+  if (viewableSubjects.length === 0) return;
+
+  const database = getDb();
+  const ts = nowMs();
+  const transaction = database.transaction(() => {
+    const upsert = database.prepare(`
+      INSERT INTO status_views (viewer_id, subject_id, subject_seen_at, viewed_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(viewer_id, subject_id)
+      DO UPDATE SET subject_seen_at = excluded.subject_seen_at, viewed_at = excluded.viewed_at
+    `);
+    for (const subject of viewableSubjects) upsert.run(viewerId, subject.id, subject.last_seen_at, ts);
+  });
+  transaction();
 }
 
 export function listAudit(limit = 200): Array<{ id: number; event_type: string; details: string; ip: string | null; created_at: number }> {

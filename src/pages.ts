@@ -1,6 +1,6 @@
 import { getTurnstileConfig } from './turnstile.js';
 import { formatLocalFooter, formatLocalShort } from './time.js';
-import type { UserRow } from './db.js';
+import type { FollowedUserStatusRow, UserRow } from './db.js';
 
 function escapeHtml(value: string): string {
   return value
@@ -33,7 +33,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .button:disabled { opacity: .55; cursor: default; }
     .footer { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; color: #777; font-size: 13px; }
     .footer a { color: #777; text-decoration: none; }
-    .lines { text-align: left; line-height: 1.8; min-width: min(420px, 80vw); }
+    .lines { text-align: center; line-height: 1.8; min-width: min(420px, 80vw); }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
     .admin h1, .admin h2 { font-size: 20px; margin: 18px 0 10px; }
     .admin table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
@@ -130,6 +130,13 @@ export function formatFollowedLine(user: UserRow): string {
   return user.last_seen_at
     ? `${initials} Last seen: ${formatLocalShort(user.last_seen_at)}`
     : `${initials} Last seen: Never logged in`;
+}
+
+export function formatFollowedStatusLine(user: FollowedUserStatusRow, viewerLastSeenAt: number | null): string {
+  const base = formatFollowedLine(user);
+  if (!viewerLastSeenAt) return `${base} - Seen you: Not yet`;
+  const hasSeenViewer = user.subject_seen_at !== null && user.subject_seen_at >= viewerLastSeenAt;
+  return `${base} - Seen you: ${hasSeenViewer ? 'Yes' : 'Not yet'}`;
 }
 
 export function adminLoginPage(adminPath: string, error = ''): string {
