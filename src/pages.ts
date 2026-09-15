@@ -58,49 +58,57 @@ export function publicHomePage(): string {
 <main class="center">
   <form id="checkin-form" class="stack" autocomplete="off">
     <input id="code" class="textbox" name="code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Check-in code">
-    <div id="turnstile"></div>
+    ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="checkin" data-theme="light" data-callback="onCheckinTurnstileSuccess" data-expired-callback="onCheckinTurnstileExpired" data-error-callback="onCheckinTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
+    <div id="turnstile-status" class="status">${turnstile.enabled ? 'Waiting for Turnstile.' : ''}</div>
   </form>
 </main>
 <div class="footer"><a href="https://jahosi.co.uk/">jahosi.co.uk</a>&nbsp;&nbsp;&nbsp; Local server time ${escapeHtml(footer)}</div>
 <script>
 const turnstileConfig = ${JSON.stringify(turnstile)};
-let widgetId = null;
+const form = document.getElementById('checkin-form');
+const statusBox = document.getElementById('turnstile-status');
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
   location.replace('https://www.google.com/');
 }
 window.addEventListener('popstate', leave);
-function token() {
-  if (!turnstileConfig.enabled) return '';
-  return window.turnstile && widgetId !== null ? (window.turnstile.getResponse(widgetId) || '') : '';
+function currentTurnstileToken() {
+  const field = form.querySelector('[name="cf-turnstile-response"]');
+  return field && field.value ? field.value : '';
 }
-function initTurnstile() {
-  if (!turnstileConfig.enabled) return;
-  if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
-  widgetId = window.turnstile.render('#turnstile', {
-    sitekey: turnstileConfig.siteKey,
-    action: 'checkin',
-    theme: 'light',
-    callback: () => { document.getElementById('submit').disabled = false; },
-    'expired-callback': () => { document.getElementById('submit').disabled = true; }
-  });
-}
-document.getElementById('checkin-form').addEventListener('submit', async (event) => {
+window.onCheckinTurnstileSuccess = function() {
+  statusBox.className = 'status';
+  statusBox.textContent = '';
+};
+window.onCheckinTurnstileExpired = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile expired. Complete it again.';
+};
+window.onCheckinTurnstileError = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile could not load. Refresh and try again.';
+};
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const turnstileToken = currentTurnstileToken();
+  if (turnstileConfig.enabled && !turnstileToken) {
+    statusBox.className = 'error';
+    statusBox.textContent = 'Complete Turnstile to continue.';
+    return;
+  }
   const code = document.getElementById('code').value;
   const response = await fetch('/api/checkin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, 'cf-turnstile-response': token() })
+    body: JSON.stringify({ code, 'cf-turnstile-response': turnstileToken })
   }).catch(() => null);
   if (!response || !response.ok) { leave(); return; }
   const result = await response.json();
   if (result.redirect) { leave(); return; }
   document.open(); document.write(result.html); document.close();
 });
-initTurnstile();
 </script>`);
 }
 
