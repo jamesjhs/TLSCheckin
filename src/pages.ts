@@ -80,6 +80,7 @@ function initTurnstile() {
   if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
   widgetId = window.turnstile.render('#turnstile', {
     sitekey: turnstileConfig.siteKey,
+    action: 'checkin',
     theme: 'light',
     callback: () => { document.getElementById('submit').disabled = false; },
     'expired-callback': () => { document.getElementById('submit').disabled = true; }
@@ -91,7 +92,7 @@ document.getElementById('checkin-form').addEventListener('submit', async (event)
   const response = await fetch('/api/checkin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, turnstileToken: token() })
+    body: JSON.stringify({ code, 'cf-turnstile-response': token() })
   }).catch(() => null);
   if (!response || !response.ok) { leave(); return; }
   const result = await response.json();
@@ -127,8 +128,8 @@ export function adminLoginPage(adminPath: string, error = ''): string {
     <input class="textbox" name="username" type="text" autocomplete="off" aria-label="Username">
     <input class="textbox" name="password" type="password" autocomplete="off" aria-label="Password">
     <div id="turnstile"></div>
-    <input id="turnstile-token" name="turnstileToken" type="hidden">
-    <button id="submit" class="button" type="submit"${turnstile.enabled ? ' disabled' : ''}>Submit</button>
+    <input id="turnstile-token" name="cf-turnstile-response" type="hidden">
+    <button id="submit" class="button" type="submit">Submit</button>
     <div class="error">${escapeHtml(error)}</div>
   </form>
 </main>
@@ -139,6 +140,7 @@ function initTurnstile() {
   if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
   window.turnstile.render('#turnstile', {
     sitekey: turnstileConfig.siteKey,
+    action: 'admin_login',
     theme: 'light',
     callback: token => { document.getElementById('turnstile-token').value = token; },
     'expired-callback': () => { document.getElementById('turnstile-token').value = ''; }

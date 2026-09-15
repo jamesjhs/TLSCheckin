@@ -67,6 +67,10 @@ function selectedIds(value: unknown): number[] {
   return [];
 }
 
+function turnstileToken(req: Request): string {
+  return String(req.body['cf-turnstile-response'] || req.body.turnstileToken || '');
+}
+
 app.get('/', (_req, res) => {
   res.type('html').send(publicHomePage());
 });
@@ -77,7 +81,7 @@ app.get('/api/turnstile-config', (_req, res) => {
 
 app.post('/api/checkin', publicLimiter, async (req, res) => {
   const ip = clientIp(req);
-  const turnstileOk = await verifyTurnstileToken(String(req.body.turnstileToken || ''), ip);
+  const turnstileOk = await verifyTurnstileToken(turnstileToken(req), 'checkin', ip);
   if (!turnstileOk) {
     recordAudit('public_invalid_submission', { reason: 'turnstile_failed' }, ip);
     res.json({ redirect: true });
@@ -142,7 +146,7 @@ adminRouter.get('/', (req, res) => {
 adminRouter.post('/login', adminLoginLimiter, async (req, res) => {
   const ip = clientIp(req);
   const adminPath = currentAdminPath(req);
-  const turnstileOk = await verifyTurnstileToken(String(req.body.turnstileToken || ''), ip);
+  const turnstileOk = await verifyTurnstileToken(turnstileToken(req), 'admin_login', ip);
   if (!turnstileOk) {
     recordAudit('admin_login_failure', { reason: 'turnstile_failed' }, ip);
     res.status(403).type('html').send(adminLoginPage(adminPath, 'Login failed.'));

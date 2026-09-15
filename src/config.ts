@@ -19,16 +19,20 @@ export const config = {
   dbEncryptionKey: required('DB_ENCRYPTION_KEY'),
   adminInitialPassword: required('ADMIN_INITIAL_PASSWORD'),
   sessionSecret: required('SESSION_SECRET'),
-  turnstileSiteKey: optional('TURNSTILE_SITE_KEY'),
-  turnstileSecretKey: optional('TURNSTILE_SECRET_KEY')
+  turnstileSiteKey: optional('TURNSTILE_SITE_KEY') || '0x4AAAAAAE2-TTENBA11-lab',
+  turnstileSecretKey: optional('TURNSTILE_SECRET') || optional('TURNSTILE_SECRET_KEY'),
+  turnstileHostnames: (optional('TURNSTILE_HOSTNAMES') || 'localhost,127.0.0.1')
+    .split(',')
+    .map((hostname) => hostname.trim().toLowerCase())
+    .filter(Boolean)
 };
 
 if (!Number.isInteger(config.port) || config.port <= 0 || config.port > 65535) {
   throw new Error('PORT must be a valid TCP port number.');
 }
 
-if ((config.turnstileSiteKey && !config.turnstileSecretKey) || (!config.turnstileSiteKey && config.turnstileSecretKey)) {
-  throw new Error('TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY must be configured together.');
+if (config.turnstileSecretKey && config.turnstileHostnames.length === 0) {
+  throw new Error('TURNSTILE_HOSTNAMES must include at least one hostname when Turnstile is enabled.');
 }
 
 export function isTurnstileEnabled(): boolean {

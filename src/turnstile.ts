@@ -10,9 +10,9 @@ export function getTurnstileConfig(): { enabled: boolean; siteKey: string | null
     : { enabled: false, siteKey: null };
 }
 
-export function verifyTurnstileToken(token: string, remoteip?: string): Promise<boolean> {
+export function verifyTurnstileToken(token: string, expectedAction: string, remoteip?: string): Promise<boolean> {
   if (!isTurnstileEnabled()) return Promise.resolve(true);
-  if (!token) return Promise.resolve(false);
+  if (!token || token.length > 2048 || !expectedAction || config.turnstileHostnames.length === 0) return Promise.resolve(false);
 
   const params = new URLSearchParams({ secret: config.turnstileSecretKey, response: token });
   if (remoteip) params.append('remoteip', remoteip);
@@ -35,8 +35,13 @@ export function verifyTurnstileToken(token: string, remoteip?: string): Promise<
         res.on('data', (chunk: Buffer) => { data += chunk; });
         res.on('end', () => {
           try {
-            const parsed = JSON.parse(data) as { success?: boolean };
-            resolve(parsed.success === true);
+            const parsed = JSON.parse(data) as { success?: boolean; action?: string; hostname?: string };
+            resolve(
+              parsed.success === true &&
+              parsed.action === expectedAction &&
+              typeof parsed.hostname === 'string' &&
+              config.turnstileHostnames.includes(parsed.hostname.toLowerCase())
+            );
           } catch {
             resolve(false);
           }

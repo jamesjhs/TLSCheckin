@@ -30,15 +30,21 @@ Required and configurable values:
 - `DB_ENCRYPTION_KEY`: SQLCipher encryption key.
 - `ADMIN_INITIAL_PASSWORD`: initial admin password, used only on first server startup.
 - `SESSION_SECRET`: secret used for admin session cookies.
-- `TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key.
-- `TURNSTILE_SECRET_KEY`: Cloudflare Turnstile secret key.
+- `TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key. Defaults to the existing widget site key `0x4AAAAAAE2-TTENBA11-lab`.
+- `TURNSTILE_SECRET`: Cloudflare Turnstile widget secret.
+- `TURNSTILE_HOSTNAMES`: comma-separated hostnames allowed in siteverify responses, for example `localhost,127.0.0.1`.
 
-Turnstile shall follow the simpler environment-driven pattern used by the local `C:\GitHub\tasker` project:
+Turnstile uses the existing-widget flow from Cloudflare's Turnstile Spin guidance:
 
-- Turnstile is enabled only when both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are present.
+- Keep the existing widget and site key; do not create a replacement widget.
+- Turnstile is enabled only when `TURNSTILE_SECRET` is present.
 - The public config endpoint may expose only whether Turnstile is enabled and the site key.
 - The secret key must never be sent to the browser.
 - Server-side Turnstile verification must happen before credential or public check-in validation.
+- Server-side verification must require `success === true`, the expected action, and a hostname listed in `TURNSTILE_HOSTNAMES`.
+- The public check-in action is `checkin`.
+- The admin login action is `admin_login`.
+- Production `TURNSTILE_HOSTNAMES` values must not include `localhost` or `127.0.0.1`.
 
 ## Time And Date Rules
 
@@ -320,6 +326,20 @@ http://localhost:9110
 
 Turnstile keys should be configured for the public hostname in Cloudflare and placed in `.env`.
 
+For the existing widget, set:
+
+```bash
+TURNSTILE_SITE_KEY=0x4AAAAAAE2-TTENBA11-lab
+TURNSTILE_SECRET=<store this only in .env or your secret manager>
+TURNSTILE_HOSTNAMES=example.com
+```
+
+For local testing only:
+
+```bash
+TURNSTILE_HOSTNAMES=localhost,127.0.0.1
+```
+
 ### Debug Checks
 
 Port conflict:
@@ -342,7 +362,9 @@ SQLCipher/database startup errors:
 
 Turnstile failures:
 
-- Confirm both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set, or both are blank.
+- Confirm `TURNSTILE_SECRET` is set when Turnstile should be enforced.
+- Confirm `TURNSTILE_SITE_KEY` is `0x4AAAAAAE2-TTENBA11-lab` unless the widget changes.
+- Confirm `TURNSTILE_HOSTNAMES` contains the hostname returned by Cloudflare siteverify.
 - Confirm the Turnstile site is configured for the public hostname.
 - Check browser developer tools for Cloudflare Turnstile script loading failures.
 - Check `pm2 logs TLSCheckin` for failed verification behavior.
