@@ -21,7 +21,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
   <meta name="robots" content="noindex,nofollow">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>${escapeHtml(title)}</title>
-  ${turnstile.enabled ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>' : ''}
+  ${turnstile.enabled ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
   <style>
     html, body { margin: 0; min-height: 100%; font-family: Arial, sans-serif; background: #fff; color: #111; }
     body { min-height: 100vh; }
@@ -41,6 +41,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .admin form { margin: 12px 0 24px; }
     .admin input, .admin select { padding: 7px 8px; margin: 3px 4px 3px 0; }
     .error { color: #a40000; min-height: 1.2em; }
+    .status { color: #666; min-height: 1.2em; font-size: 13px; }
   </style>
   ${extraHead}
 </head>
@@ -127,50 +128,38 @@ export function adminLoginPage(adminPath: string, error = ''): string {
   <form class="stack" action="${escapeHtml(adminPath)}/login" method="post" autocomplete="off">
     <input class="textbox" name="username" type="text" autocomplete="off" aria-label="Username">
     <input class="textbox" name="password" type="password" autocomplete="off" aria-label="Password">
-    <div id="turnstile"></div>
-    <input id="turnstile-token" name="cf-turnstile-response" type="hidden">
-    <button id="submit" class="button" type="submit"${turnstile.enabled ? ' disabled' : ''}>Submit</button>
-    <div id="turnstile-status" class="error">${escapeHtml(error || (turnstile.enabled ? 'Complete Turnstile to continue.' : ''))}</div>
+    ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="admin_login" data-theme="light" data-callback="onAdminTurnstileSuccess" data-expired-callback="onAdminTurnstileExpired" data-error-callback="onAdminTurnstileError"></div>` : ''}
+    <button id="submit" class="button" type="submit">Submit</button>
+    <div id="turnstile-status" class="${error ? 'error' : 'status'}">${escapeHtml(error || (turnstile.enabled ? 'Waiting for Turnstile.' : ''))}</div>
   </form>
 </main>
 <script>
 const turnstileConfig = ${JSON.stringify(turnstile)};
 const form = document.querySelector('form');
-const submitButton = document.getElementById('submit');
-const tokenField = document.getElementById('turnstile-token');
 const statusBox = document.getElementById('turnstile-status');
-function initTurnstile() {
-  if (!turnstileConfig.enabled) return;
-  if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
-  window.turnstile.render('#turnstile', {
-    sitekey: turnstileConfig.siteKey,
-    action: 'admin_login',
-    theme: 'light',
-    callback: token => {
-      tokenField.value = token;
-      submitButton.disabled = false;
-      statusBox.textContent = '';
-    },
-    'expired-callback': () => {
-      tokenField.value = '';
-      submitButton.disabled = true;
-      statusBox.textContent = 'Turnstile expired. Complete it again.';
-    },
-    'error-callback': () => {
-      tokenField.value = '';
-      submitButton.disabled = true;
-      statusBox.textContent = 'Turnstile could not load. Refresh and try again.';
-    }
-  });
+function currentTurnstileToken() {
+  const field = form.querySelector('[name="cf-turnstile-response"]');
+  return field && field.value ? field.value : '';
 }
+window.onAdminTurnstileSuccess = function() {
+  statusBox.className = 'status';
+  statusBox.textContent = '';
+};
+window.onAdminTurnstileExpired = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile expired. Complete it again.';
+};
+window.onAdminTurnstileError = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile could not load. Refresh and try again.';
+};
 form.addEventListener('submit', event => {
-  if (turnstileConfig.enabled && !tokenField.value) {
+  if (turnstileConfig.enabled && !currentTurnstileToken()) {
     event.preventDefault();
-    submitButton.disabled = true;
+    statusBox.className = 'error';
     statusBox.textContent = 'Complete Turnstile to continue.';
   }
 });
-initTurnstile();
 </script>`);
 }
 
