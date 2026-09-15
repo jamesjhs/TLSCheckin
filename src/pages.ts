@@ -58,7 +58,7 @@ export function publicHomePage(): string {
   <form id="checkin-form" class="stack" autocomplete="off">
     <input id="code" class="textbox" name="code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Check-in code">
     <div id="turnstile"></div>
-    <button id="submit" class="button" type="submit"${turnstile.enabled ? ' disabled' : ''}>Submit</button>
+    <button id="submit" class="button" type="submit">Submit</button>
   </form>
 </main>
 <div class="footer"><a href="https://jahosi.co.uk/">jahosi.co.uk</a>&nbsp;&nbsp;&nbsp; Local server time ${escapeHtml(footer)}</div>
@@ -140,8 +140,8 @@ function initTurnstile() {
   window.turnstile.render('#turnstile', {
     sitekey: turnstileConfig.siteKey,
     theme: 'light',
-    callback: token => { document.getElementById('turnstile-token').value = token; document.getElementById('submit').disabled = false; },
-    'expired-callback': () => { document.getElementById('turnstile-token').value = ''; document.getElementById('submit').disabled = true; }
+    callback: token => { document.getElementById('turnstile-token').value = token; },
+    'expired-callback': () => { document.getElementById('turnstile-token').value = ''; }
   });
 }
 initTurnstile();
