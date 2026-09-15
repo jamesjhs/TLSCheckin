@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { initDb, getAdmin, recordAudit, findUserByIdentity, updateLastSeen, getFollowedUsers, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
-import { localDdmmyy, localYymmdd, nowMs } from './time.js';
+import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
 import { adminLoginPage, adminPage, formatFollowedLine, passwordChangePage, publicHomePage, resultPage } from './pages.js';
 
 const app = express();
@@ -46,7 +46,6 @@ function clientIp(req: Request): string {
 
 function currentAdminPath(req?: Request): string {
   const path = `/${localYymmdd()}`;
-  if (req) req.app.locals.adminPath = path;
   return path;
 }
 
@@ -78,6 +77,16 @@ app.get('/', (_req, res) => {
 
 app.get('/api/turnstile-config', (_req, res) => {
   res.json(getTurnstileConfig());
+});
+
+app.get('/api/server-time', (_req, res) => {
+  res.json({
+    timezone: appTimezone(),
+    localServerTime: formatLocalFooter(),
+    adminPath: currentAdminPath(),
+    checkinDate: localDdmmyy(),
+    isoNow: new Date().toISOString()
+  });
 });
 
 app.post('/api/checkin', publicLimiter, async (req, res) => {
@@ -127,7 +136,6 @@ adminRouter.use((req, res, next) => {
     res.status(404).type('text').send('Not found');
     return;
   }
-  req.app.locals.adminPath = `/${requestedDate}`;
   next();
 });
 
@@ -287,6 +295,7 @@ initDb()
     app.listen(config.port, () => {
       console.log(`TLSCheckin listening on http://localhost:${config.port}`);
       console.log(`Admin path for local server date: ${currentAdminPath()}`);
+      console.log(`App timezone: ${appTimezone()}`);
       console.log('Turnstile configuration', {
         enabled: getTurnstileConfig().enabled,
         siteKey: getTurnstileConfig().siteKey,

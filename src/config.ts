@@ -19,6 +19,7 @@ export const config = {
   dbEncryptionKey: required('DB_ENCRYPTION_KEY'),
   adminInitialPassword: required('ADMIN_INITIAL_PASSWORD'),
   sessionSecret: required('SESSION_SECRET'),
+  appTimezone: optional('APP_TIMEZONE') || 'Europe/London',
   turnstileSiteKey: optional('TURNSTILE_SITE_KEY') || '0x4AAAAAAE2-TTENBA11-lab',
   turnstileSecretKey: optional('TURNSTILE_SECRET') || optional('TURNSTILE_SECRET_KEY'),
   turnstileHostnames: (optional('TURNSTILE_HOSTNAMES') || 'localhost,127.0.0.1')

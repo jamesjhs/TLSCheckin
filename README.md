@@ -30,6 +30,7 @@ Required and configurable values:
 - `DB_ENCRYPTION_KEY`: SQLCipher encryption key.
 - `ADMIN_INITIAL_PASSWORD`: initial admin password, used only on first server startup.
 - `SESSION_SECRET`: secret used for admin session cookies.
+- `APP_TIMEZONE`: IANA timezone used for app-visible dates, default `Europe/London`.
 - `TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key. Defaults to the existing widget site key `0x4AAAAAAE2-TTENBA11-lab`.
 - `TURNSTILE_SECRET`: Cloudflare Turnstile widget secret.
 - `TURNSTILE_HOSTNAMES`: comma-separated hostnames allowed in siteverify responses, for example `localhost,127.0.0.1`.
@@ -48,7 +49,7 @@ Turnstile uses the existing-widget flow from Cloudflare's Turnstile Spin guidanc
 
 ## Time And Date Rules
 
-All dates and times on the site shall use the local server timezone. Do not use UTC for app-visible date validation or display unless a future requirement explicitly changes this.
+All dates and times on the site shall use the configured app timezone, set by `APP_TIMEZONE` and defaulting to `Europe/London`. Do not use UTC or browser-local time for app-visible date validation or display unless a future requirement explicitly changes this.
 
 The public home screen footer shall include the local server time next to the `jahosi.co.uk` link:
 
@@ -56,7 +57,7 @@ The public home screen footer shall include the local server time next to the `j
 jahosi.co.uk    Local server time hh:mm dd/mm/yyyy
 ```
 
-The admin date endpoint shall also use local server date. For example, on 15 September 2026 local server time, the admin endpoint is:
+The admin date endpoint shall also use the configured app timezone date. For example, on 15 September 2026 in `APP_TIMEZONE`, the admin endpoint is:
 
 ```text
 /260915
@@ -253,7 +254,7 @@ Visit:
 http://localhost:9110/
 ```
 
-The admin path uses local server date in `yymmdd` format. For example:
+The admin path uses the `APP_TIMEZONE` date in `yymmdd` format. For example:
 
 ```text
 http://localhost:9110/260915
@@ -371,8 +372,9 @@ Turnstile failures:
 
 Admin login problems:
 
-- Confirm the admin URL is today's local server date in `yymmdd` format.
-- Confirm the server timezone with `date`.
+- Confirm the admin URL is today's `APP_TIMEZONE` date in `yymmdd` format.
+- Visit `/api/server-time` to see the running process's configured timezone, current app date, and current admin path.
+- Confirm `APP_TIMEZONE` is set correctly in `.env`; the default is `Europe/London`.
 - Confirm `ADMIN_INITIAL_PASSWORD` was set before first startup.
 - After the first successful login and password change, `ADMIN_INITIAL_PASSWORD` no longer resets the account.
 - Active admin sessions remain valid if the date changes while logged in.
@@ -381,7 +383,7 @@ Admin login problems:
 
 These decisions are explicit and should not be guessed differently during development:
 
-- All app-visible dates use local server time, not UTC and not browser-local time.
+- All app-visible dates use `APP_TIMEZONE`, not UTC and not browser-local time.
 - Public submission accepts both hyphenated and non-hyphenated forms.
 - User identity is case-insensitive and must be unique.
 - Users can follow multiple users.

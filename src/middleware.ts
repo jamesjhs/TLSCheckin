@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { localYymmdd } from './time.js';
 
 export function noCache(_req: Request, res: Response, next: NextFunction): void {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -20,7 +21,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 export function requireAdminPage(req: Request, res: Response, next: NextFunction): void {
   const session = req.session as typeof req.session & { adminId?: number };
   if (!session.adminId) {
-    res.redirect(req.app.locals.adminPath || '/');
+    res.redirect(`/${localYymmdd()}`);
     return;
   }
   next();
