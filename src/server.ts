@@ -292,6 +292,9 @@ initDb()
         siteKey: getTurnstileConfig().siteKey,
         expectedHostnames: config.turnstileHostnames
       });
+      if (getTurnstileConfig().enabled && config.turnstileHostnames.every((hostname) => hostname === 'localhost' || hostname === '127.0.0.1')) {
+        console.warn('Turnstile is enabled with local-only TURNSTILE_HOSTNAMES. Set TURNSTILE_HOSTNAMES to the production hostname on deployed servers.');
+      }
     });
   })
   .catch((error: unknown) => {

@@ -129,12 +129,16 @@ export function adminLoginPage(adminPath: string, error = ''): string {
     <input class="textbox" name="password" type="password" autocomplete="off" aria-label="Password">
     <div id="turnstile"></div>
     <input id="turnstile-token" name="cf-turnstile-response" type="hidden">
-    <button id="submit" class="button" type="submit">Submit</button>
-    <div class="error">${escapeHtml(error)}</div>
+    <button id="submit" class="button" type="submit"${turnstile.enabled ? ' disabled' : ''}>Submit</button>
+    <div id="turnstile-status" class="error">${escapeHtml(error || (turnstile.enabled ? 'Complete Turnstile to continue.' : ''))}</div>
   </form>
 </main>
 <script>
 const turnstileConfig = ${JSON.stringify(turnstile)};
+const form = document.querySelector('form');
+const submitButton = document.getElementById('submit');
+const tokenField = document.getElementById('turnstile-token');
+const statusBox = document.getElementById('turnstile-status');
 function initTurnstile() {
   if (!turnstileConfig.enabled) return;
   if (!window.turnstile || typeof window.turnstile.render !== 'function') { setTimeout(initTurnstile, 100); return; }
@@ -142,10 +146,30 @@ function initTurnstile() {
     sitekey: turnstileConfig.siteKey,
     action: 'admin_login',
     theme: 'light',
-    callback: token => { document.getElementById('turnstile-token').value = token; },
-    'expired-callback': () => { document.getElementById('turnstile-token').value = ''; }
+    callback: token => {
+      tokenField.value = token;
+      submitButton.disabled = false;
+      statusBox.textContent = '';
+    },
+    'expired-callback': () => {
+      tokenField.value = '';
+      submitButton.disabled = true;
+      statusBox.textContent = 'Turnstile expired. Complete it again.';
+    },
+    'error-callback': () => {
+      tokenField.value = '';
+      submitButton.disabled = true;
+      statusBox.textContent = 'Turnstile could not load. Refresh and try again.';
+    }
   });
 }
+form.addEventListener('submit', event => {
+  if (turnstileConfig.enabled && !tokenField.value) {
+    event.preventDefault();
+    submitButton.disabled = true;
+    statusBox.textContent = 'Complete Turnstile to continue.';
+  }
+});
 initTurnstile();
 </script>`);
 }
