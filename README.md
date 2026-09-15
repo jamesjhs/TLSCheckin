@@ -100,7 +100,7 @@ On invalid submission or blank submission:
 
 - Blank the page to white.
 - Best-effort prevent browser back navigation.
-- Redirect to `https://www.google.com/`.
+- Redirect to `https://www.google.co.uk/`.
 - Record a failed/invalid public submission event in the audit trail without storing the raw invalid submitted code.
 
 ## Public-Facing Page
@@ -132,7 +132,7 @@ If the user follows nobody, show:
 Login noted
 ```
 
-The result page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.com/`.
+The public check-in, admin login, and result pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The result page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
 
 ## Admin Page
 

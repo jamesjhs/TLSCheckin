@@ -28,6 +28,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
     input, button, select { font: inherit; }
     .center { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; box-sizing: border-box; }
     .stack { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+    .home-logo { width: min(360px, 82vw); aspect-ratio: 2 / 1; object-fit: contain; display: block; margin-bottom: 6px; }
     .textbox { width: min(320px, 80vw); padding: 10px 12px; border: 1px solid #bbb; border-radius: 2px; text-align: center; }
     .button { padding: 8px 18px; border: 1px solid #888; background: #f4f4f4; color: #111; cursor: pointer; border-radius: 2px; }
     .button:disabled { opacity: .55; cursor: default; }
@@ -57,8 +58,9 @@ export function publicHomePage(): string {
   return basePage('TLSCheckin', `
 <main class="center">
   <form id="checkin-form" class="stack" autocomplete="off">
+    <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
     <input id="user" class="textbox" name="user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="User" aria-label="User">
-    <input id="secret" class="textbox" name="secret" type="text" autocomplete="off" inputmode="numeric" placeholder="Secret" aria-label="Secret">
+    <input id="secret" class="textbox" name="secret" type="password" autocomplete="off" inputmode="numeric" placeholder="Secret" aria-label="Secret">
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="checkin" data-theme="light" data-callback="onCheckinTurnstileSuccess" data-expired-callback="onCheckinTurnstileExpired" data-error-callback="onCheckinTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="status">${turnstile.enabled ? 'Waiting for Turnstile.' : ''}</div>
@@ -67,13 +69,15 @@ export function publicHomePage(): string {
 <div class="footer"><a href="https://jahosi.co.uk/">jahosi.co.uk</a>&nbsp;&nbsp;&nbsp; Local server time ${escapeHtml(footer)}</div>
 <script>
 const turnstileConfig = ${JSON.stringify(turnstile)};
+const redirectUrl = 'https://www.google.co.uk/';
 const form = document.getElementById('checkin-form');
 const statusBox = document.getElementById('turnstile-status');
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
-  location.replace('https://www.google.com/');
+  location.replace(redirectUrl);
 }
+setTimeout(leave, 60000);
 window.addEventListener('popstate', leave);
 function currentTurnstileToken() {
   const field = form.querySelector('[name="cf-turnstile-response"]');
@@ -120,9 +124,19 @@ export function resultPage(lines: string[]): string {
 <main class="center">
   <div class="stack">
     <div class="lines">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
-    <button class="button" type="button" onclick="document.documentElement.innerHTML=''; location.replace('https://www.google.com/');">Exit</button>
+    <button class="button" type="button" onclick="leave()">Exit</button>
   </div>
-</main>`);
+</main>
+<script>
+const redirectUrl = 'https://www.google.co.uk/';
+function leave() {
+  document.documentElement.innerHTML = '';
+  try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
+  location.replace(redirectUrl);
+}
+setTimeout(leave, 60000);
+window.addEventListener('popstate', leave);
+</script>`);
 }
 
 export function formatFollowedLine(user: UserRow): string {
@@ -153,8 +167,16 @@ export function adminLoginPage(adminPath: string, error = ''): string {
 </main>
 <script>
 const turnstileConfig = ${JSON.stringify(turnstile)};
+const redirectUrl = 'https://www.google.co.uk/';
 const form = document.querySelector('form');
 const statusBox = document.getElementById('turnstile-status');
+function leave() {
+  document.documentElement.innerHTML = '';
+  try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
+  location.replace(redirectUrl);
+}
+setTimeout(leave, 60000);
+window.addEventListener('popstate', leave);
 function currentTurnstileToken() {
   const field = form.querySelector('[name="cf-turnstile-response"]');
   return field && field.value ? field.value : '';
