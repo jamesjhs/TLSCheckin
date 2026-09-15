@@ -180,9 +180,9 @@ Audit events shall include:
 
 The audit trail should record timestamps in local server time for display. Internal storage may use a stable timestamp format, but displayed audit dates must follow the site's local server time rule.
 
-## Installation And Operations Manual Requirements
+## Installation And Operations Manual
 
-The README shall include full npm/pm2 installation and debug guidance as implementation progresses. The deployment documentation should assume:
+The deployment documentation assumes:
 
 - Debian 12.
 - Node.js LTS.
@@ -192,23 +192,168 @@ The README shall include full npm/pm2 installation and debug guidance as impleme
 - Cloudflare Tunnel optional.
 - App runs on HTTP locally, usually behind Cloudflare Tunnel or nginx.
 
-The installation/debug manual should cover:
+### Debian 12 Setup
 
-- Installing Node.js LTS.
-- Installing build dependencies needed for SQLCipher/bcrypt if required.
-- Installing app dependencies with npm.
-- Creating `.env` from `.env.example`.
-- Generating strong `DB_ENCRYPTION_KEY` and `SESSION_SECRET` values.
-- Building the TypeScript app.
-- Starting the app with pm2.
-- Saving pm2 process list.
-- Enabling pm2 startup on Debian.
-- Viewing logs with pm2.
-- Restarting after `.env` changes.
-- Testing the local HTTP endpoint.
-- Optional nginx reverse proxy setup.
-- Optional Cloudflare Tunnel setup notes.
-- Common debug checks for port conflicts, missing env vars, SQLCipher startup errors, Turnstile failures, and admin login problems.
+Install Node.js LTS and basic build tools:
+
+```bash
+sudo apt update
+sudo apt install -y curl ca-certificates build-essential python3 make g++
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs
+node --version
+npm --version
+```
+
+Install pm2 globally:
+
+```bash
+sudo npm install -g pm2
+```
+
+Install app dependencies:
+
+```bash
+cd /path/to/TLSCheckin
+npm install
+```
+
+Create and edit the environment file:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Generate strong secrets:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 32
+```
+
+Use one value for `DB_ENCRYPTION_KEY` and one for `SESSION_SECRET`. Set `ADMIN_INITIAL_PASSWORD` to a temporary strong password; the admin account is forced to change it after first login.
+
+Build and run locally:
+
+```bash
+npm run build
+npm start
+```
+
+Visit:
+
+```text
+http://localhost:9110/
+```
+
+The admin path uses local server date in `yymmdd` format. For example:
+
+```text
+http://localhost:9110/260915
+```
+
+### pm2 Runtime
+
+Start the compiled app:
+
+```bash
+pm2 start dist/server.js --name TLSCheckin
+pm2 save
+pm2 startup
+```
+
+View status and logs:
+
+```bash
+pm2 status
+pm2 logs TLSCheckin
+```
+
+Restart after `.env` changes or rebuilds:
+
+```bash
+npm run build
+pm2 restart TLSCheckin --update-env
+```
+
+Stop the app:
+
+```bash
+pm2 stop TLSCheckin
+```
+
+### Optional nginx Reverse Proxy
+
+The app serves plain HTTP and is intended to run behind nginx or Cloudflare Tunnel. A minimal nginx server block:
+
+```nginx
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:9110;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Reload nginx after validation:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Optional Cloudflare Tunnel
+
+Run the app on localhost with pm2, then point a Cloudflare Tunnel public hostname at:
+
+```text
+http://localhost:9110
+```
+
+Turnstile keys should be configured for the public hostname in Cloudflare and placed in `.env`.
+
+### Debug Checks
+
+Port conflict:
+
+```bash
+sudo ss -ltnp | grep 9110
+```
+
+Missing environment variables:
+
+```bash
+pm2 logs TLSCheckin
+```
+
+SQLCipher/database startup errors:
+
+- Confirm `DB_ENCRYPTION_KEY` is set and unchanged from the original database creation.
+- Confirm the directory containing `DB_PATH` is writable by the app user.
+- If intentionally starting fresh, stop the app and move the old database files out of the way.
+
+Turnstile failures:
+
+- Confirm both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set, or both are blank.
+- Confirm the Turnstile site is configured for the public hostname.
+- Check browser developer tools for Cloudflare Turnstile script loading failures.
+- Check `pm2 logs TLSCheckin` for failed verification behavior.
+
+Admin login problems:
+
+- Confirm the admin URL is today's local server date in `yymmdd` format.
+- Confirm the server timezone with `date`.
+- Confirm `ADMIN_INITIAL_PASSWORD` was set before first startup.
+- After the first successful login and password change, `ADMIN_INITIAL_PASSWORD` no longer resets the account.
+- Active admin sessions remain valid if the date changes while logged in.
 
 ## Closed Clarifications To Prevent Hallucinated Implementation
 
@@ -234,7 +379,7 @@ These decisions are explicit and should not be guessed differently during develo
 
 ### Phase 1: Project Scaffold, Configuration, And Security Baseline
 
-Implement the TypeScript Node.js project skeleton according to Technology, Environment Variables, Time And Date Rules, and Installation And Operations Manual Requirements.
+Implement the TypeScript Node.js project skeleton according to Technology, Environment Variables, Time And Date Rules, and Installation And Operations Manual.
 
 Detailed instructions:
 
@@ -286,7 +431,7 @@ Detailed instructions:
 
 ### Phase 4: Admin UI, Deployment Hardening, And Verification
 
-Implement the admin interface and complete operational verification according to Admin Page and Installation And Operations Manual Requirements.
+Implement the admin interface and complete operational verification according to Admin Page and Installation And Operations Manual.
 
 Detailed instructions:
 
