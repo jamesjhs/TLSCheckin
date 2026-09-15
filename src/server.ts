@@ -82,9 +82,9 @@ app.get('/api/turnstile-config', (_req, res) => {
 
 app.post('/api/checkin', publicLimiter, async (req, res) => {
   const ip = clientIp(req);
-  const turnstileOk = await verifyTurnstileToken(turnstileToken(req), 'checkin', ip);
-  if (!turnstileOk) {
-    recordAudit('public_invalid_submission', { reason: 'turnstile_failed' }, ip);
+  const turnstile = await verifyTurnstileToken(turnstileToken(req), 'checkin', ip);
+  if (!turnstile.ok) {
+    recordAudit('public_invalid_submission', { reason: 'turnstile_failed', detail: turnstile.reason }, ip);
     res.json({ redirect: true });
     return;
   }
@@ -147,20 +147,42 @@ adminRouter.get('/', (req, res) => {
 adminRouter.post('/login', adminLoginLimiter, async (req, res) => {
   const ip = clientIp(req);
   const adminPath = currentAdminPath(req);
-  const turnstileOk = await verifyTurnstileToken(turnstileToken(req), 'admin_login', ip);
-  if (!turnstileOk) {
-    recordAudit('admin_login_failure', { reason: 'turnstile_failed' }, ip);
+  const submittedUsername = String(((req.body ?? {}) as Record<string, unknown>).username || '').trim();
+  const token = turnstileToken(req);
+  const turnstile = await verifyTurnstileToken(token, 'admin_login', ip);
+  if (!turnstile.ok) {
+    console.warn('[admin-login] Turnstile verification failed', {
+      ip,
+      usernamePresent: submittedUsername.length > 0,
+      tokenPresent: token.length > 0,
+      tokenLength: token.length,
+      reason: turnstile.reason,
+      enabled: turnstile.enabled,
+      expectedAction: turnstile.expectedAction,
+      expectedHostnames: turnstile.expectedHostnames,
+      siteverify: turnstile.response,
+      httpStatus: turnstile.httpStatus
+    });
+    recordAudit('admin_login_failure', { reason: 'turnstile_failed', detail: turnstile.reason }, ip);
     res.status(403).type('html').send(adminLoginPage(adminPath, 'Login failed.'));
     return;
   }
 
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
   const admin = getAdmin();
   const usernameOk = username === admin.username;
   const passwordOk = await bcrypt.compare(password, usernameOk ? admin.password_hash : '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinval');
 
   if (!usernameOk || !passwordOk) {
+    console.warn('[admin-login] Credential verification failed', {
+      ip,
+      usernamePresent: username.length > 0,
+      usernameMatchesAdmin: usernameOk,
+      passwordPresent: password.length > 0,
+      passwordMatches: usernameOk ? passwordOk : false
+    });
     recordAudit('admin_login_failure', { reason: 'bad_credentials' }, ip);
     res.status(401).type('html').send(adminLoginPage(adminPath, 'Login failed.'));
     return;
@@ -171,6 +193,10 @@ adminRouter.post('/login', adminLoginLimiter, async (req, res) => {
   sessionData.adminId = admin.id;
   sessionData.mustChangePassword = admin.must_change_password === 1;
   sessionData.loggedInAt = nowMs();
+  console.info('[admin-login] Login successful', {
+    ip,
+    mustChangePassword: sessionData.mustChangePassword
+  });
   recordAudit('admin_login_success', { username: admin.username }, ip);
   res.redirect(sessionData.mustChangePassword ? `${adminPath}/change-password` : adminPath);
 });
@@ -261,6 +287,11 @@ initDb()
     app.listen(config.port, () => {
       console.log(`TLSCheckin listening on http://localhost:${config.port}`);
       console.log(`Admin path for local server date: ${currentAdminPath()}`);
+      console.log('Turnstile configuration', {
+        enabled: getTurnstileConfig().enabled,
+        siteKey: getTurnstileConfig().siteKey,
+        expectedHostnames: config.turnstileHostnames
+      });
     });
   })
   .catch((error: unknown) => {
