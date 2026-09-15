@@ -54,7 +54,7 @@ All dates and times on the site shall use the configured app timezone, set by `A
 The public home screen footer shall include the local server time next to the `jahosi.co.uk` link:
 
 ```text
-jahosi.co.uk    Local server time hh:mm dd/mm/yyyy
+jahosi.co.uk    Local server time hh:mm dd/mm/yy
 ```
 
 The admin date endpoint shall also use the configured app timezone date. For example, on 15 September 2026 in `APP_TIMEZONE`, the admin endpoint is:
@@ -413,7 +413,7 @@ Detailed instructions:
 - Set the default port to `9110`.
 - Ensure app pages send headers to disable browser cache.
 - Ensure form fields use autocomplete-disabled markup where applicable.
-- Add local-server-time formatting helpers for `hh:mm dd/mm/yyyy`, `ddmmyy`, and `yymmdd`.
+- Add local-server-time formatting helpers for `hh:mm dd/mm/yy`, `ddmmyy`, and `yymmdd`.
 - Add README install/debug content for npm, pm2, Debian 12, Node LTS, optional nginx, and optional Cloudflare Tunnel.
 - Do not implement browser-local or UTC date behavior.
 

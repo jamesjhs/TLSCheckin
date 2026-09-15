@@ -48,7 +48,7 @@ export function localYymmdd(date = new Date()): string {
 
 export function formatLocalFooter(date = new Date()): string {
   const p = parts(date);
-  return `${p.hour}:${p.minute} ${p.day}/${p.month}/${p.year}`;
+  return `${p.hour}:${p.minute} ${p.day}/${p.month}/${p.year.slice(-2)}`;
 }
 
 export function formatLocalShort(timestampMs: number): string {
