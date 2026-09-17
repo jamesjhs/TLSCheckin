@@ -6,7 +6,7 @@ Very quick and easy status checker.
 
 TLSCheckin is a self-hosted Node.js TypeScript app that provides a rapid, simple way for multiple users to set an "I'm alive" status and view the latest status for the users they follow. The public-facing flow uses a single text entry box, Cloudflare Turnstile verification, and a minimal plain HTML/JavaScript front end.
 
-The app is intentionally small and direct. Users do not have persistent public sessions. A successful public submission records the user's check-in immediately, then displays the latest status for the users they follow.
+The app is intentionally small and direct. A successful public submission records the user's check-in, starts a short browser session, and displays the latest status for the users they follow. From that landing page, users can create or rotate a secret PIN-protected link for future check-ins.
 
 ## Technology
 
@@ -45,6 +45,7 @@ Turnstile uses the existing-widget flow from Cloudflare's Turnstile Spin guidanc
 - Server-side verification must require `success === true`, the expected action, and a hostname listed in `TURNSTILE_HOSTNAMES`.
 - The public check-in action is `checkin`.
 - The admin login action is `admin_login`.
+- The secret-link PIN action is `secret_pin`.
 - Production `TURNSTILE_HOSTNAMES` values must not include `localhost` or `127.0.0.1`.
 
 ## Time And Date Rules
@@ -87,14 +88,15 @@ Valid examples for 15 September 2026:
 1509260612jr
 ```
 
-On successful submission:
+On successful username/secret submission:
 
 - Verify Turnstile first.
 - Validate the submitted local server date.
 - Resolve the user identity case-insensitively.
 - Immediately update that user's `last_seen`.
+- Start a user session.
 - Record the successful public check-in in the audit trail.
-- Show a simple result page.
+- Show the user's landing page.
 
 On invalid submission or blank submission:
 
@@ -115,9 +117,9 @@ The default page shall be a white page with:
 
 The page shall disable browser cache and autocomplete.
 
-## User Result Page
+## User Landing Page
 
-Users do not receive a persistent session. The successful submission returns a result page only.
+Users receive a browser session after a successful public username/secret submission or secret-link PIN submission. Visiting `/` with an active user session returns the landing page instead of the public login form.
 
 If the user follows one or more users, show each followed user on its own line:
 
@@ -132,7 +134,11 @@ If the user follows nobody, show:
 Login noted
 ```
 
-The public check-in, admin login, and result pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The result page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
+The landing page allows the user to set a 4-digit PIN and generate a 15-character secret link code. Once created, the secret link is always shown in the user's landing-page area. The database stores the URL token in the encrypted database for display, a hash of the URL token for lookup, and a bcrypt hash of the PIN. A user may rotate the secret link from an authenticated session, invalidating the previous URL.
+
+Opening a secret link displays a Turnstile-protected PIN page. A correct PIN starts a user session, records the check-in, and shows the same landing page while bypassing the username/secret login form.
+
+The public check-in, admin login, secret-link PIN, and landing pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The landing page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
 
 ## Admin Page
 
@@ -388,7 +394,10 @@ These decisions are explicit and should not be guessed differently during develo
 - User identity is case-insensitive and must be unique.
 - Users can follow multiple users.
 - A successful public submission always updates `last_seen` immediately.
-- Public users do not get sessions.
+- Public users get browser sessions after successful username/secret or secret-link PIN login.
+- User secret link codes are 15 URL-safe characters.
+- User secret links store the URL token in the encrypted database for display, plus a hashed URL token and bcrypt-hashed 4-digit PIN.
+- Secret-link PIN login is Turnstile-protected with action `secret_pin`.
 - Admin users do get sessions.
 - Admin sessions remain valid across date changes.
 - The admin initial password is initialized on first server startup.

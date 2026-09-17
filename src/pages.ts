@@ -35,6 +35,11 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .footer { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; color: #777; font-size: 13px; }
     .footer a { color: #777; text-decoration: none; }
     .lines { text-align: center; line-height: 1.8; min-width: min(420px, 80vw); }
+    .link-tools { width: min(520px, 88vw); margin-top: 8px; padding-top: 12px; border-top: 1px solid #ddd; }
+    .link-tools form { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin: 0 0 10px; }
+    .link-tools .textbox { width: 120px; }
+    .secret-url { overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; }
+    .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
     .admin h1, .admin h2 { font-size: 20px; margin: 18px 0 10px; }
     .admin table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
@@ -136,6 +141,119 @@ function leave() {
 }
 setTimeout(leave, 60000);
 window.addEventListener('popstate', leave);
+</script>`);
+}
+
+export function userLandingPage(data: {
+  lines: string[];
+  hasSecretLink: boolean;
+  secretUrl?: string;
+}): string {
+  return basePage('TLSCheckin', `
+<main class="center">
+  <div class="stack">
+    <div class="lines">${data.lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+    <section class="link-tools" aria-label="Secret link settings">
+      <form id="pin-form" autocomplete="off">
+        <input id="pin" class="textbox" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
+        <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
+      </form>
+      <form id="rotate-form">
+        <button class="button" type="submit" ${data.hasSecretLink ? '' : 'disabled'}>Rotate Link</button>
+      </form>
+      <div id="link-status" class="status">${escapeHtml(data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.')}</div>
+      <div id="secret-url" class="secret-url">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</div>
+    </section>
+    <button class="button" type="button" onclick="leave()">Exit</button>
+  </div>
+</main>
+<script>
+const redirectUrl = 'https://www.google.co.uk/';
+const statusBox = document.getElementById('link-status');
+const secretUrlBox = document.getElementById('secret-url');
+const rotateButton = document.querySelector('#rotate-form button');
+function leave() {
+  document.documentElement.innerHTML = '';
+  try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
+  location.replace(redirectUrl);
+}
+setTimeout(leave, 60000);
+window.addEventListener('popstate', leave);
+function showResult(result) {
+  statusBox.className = result.ok ? 'status' : 'error';
+  statusBox.textContent = result.message || (result.ok ? 'Saved.' : 'Unable to save.');
+  if (result.secretUrl) secretUrlBox.textContent = result.secretUrl;
+  if (result.ok && rotateButton) rotateButton.disabled = false;
+}
+document.getElementById('pin-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const pin = document.getElementById('pin').value.trim();
+  if (!/^\\d{4}$/.test(pin)) {
+    showResult({ ok: false, message: 'Enter a 4-digit PIN.' });
+    return;
+  }
+  const response = await fetch('/api/secret-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin })
+  }).catch(() => null);
+  showResult(response && response.ok ? await response.json() : { ok: false, message: 'Unable to save.' });
+});
+document.getElementById('rotate-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const response = await fetch('/api/secret-link/rotate', { method: 'POST' }).catch(() => null);
+  showResult(response && response.ok ? await response.json() : { ok: false, message: 'Unable to rotate.' });
+});
+</script>`);
+}
+
+export function secretPinPage(secretPath: string, error = ''): string {
+  const turnstile = getTurnstileConfig();
+  return basePage('TLSCheckin', `
+<main class="center">
+  <form class="stack" action="${escapeHtml(secretPath)}" method="post" autocomplete="off">
+    <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
+    <input class="textbox" name="pin" type="password" autocomplete="off" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="PIN" aria-label="PIN" required>
+    ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="secret_pin" data-theme="light" data-callback="onSecretTurnstileSuccess" data-expired-callback="onSecretTurnstileExpired" data-error-callback="onSecretTurnstileError"></div>` : ''}
+    <button id="submit" class="button" type="submit">Submit</button>
+    <div id="turnstile-status" class="${error ? 'error' : 'status'}">${escapeHtml(error || (turnstile.enabled ? 'Waiting for Turnstile.' : ''))}</div>
+  </form>
+</main>
+<script>
+const turnstileConfig = ${JSON.stringify(turnstile)};
+const redirectUrl = 'https://www.google.co.uk/';
+const form = document.querySelector('form');
+const statusBox = document.getElementById('turnstile-status');
+function leave() {
+  document.documentElement.innerHTML = '';
+  try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
+  location.replace(redirectUrl);
+}
+setTimeout(leave, 60000);
+window.addEventListener('popstate', leave);
+function currentTurnstileToken() {
+  const field = form.querySelector('[name="cf-turnstile-response"]');
+  return field && field.value ? field.value : '';
+}
+window.onSecretTurnstileSuccess = function() {
+  statusBox.className = 'status';
+  statusBox.textContent = '';
+};
+window.onSecretTurnstileExpired = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile expired. Complete it again.';
+};
+window.onSecretTurnstileError = function() {
+  statusBox.className = 'error';
+  statusBox.textContent = 'Turnstile could not load. Refresh and try again.';
+};
+form.addEventListener('submit', event => {
+  if (turnstileConfig.enabled && !currentTurnstileToken()) {
+    event.preventDefault();
+    statusBox.className = 'error';
+    statusBox.textContent = 'Complete Turnstile to continue.';
+  }
+});
 </script>`);
 }
 

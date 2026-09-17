@@ -17,6 +17,15 @@ export type UserRow = {
   updated_at: number;
 };
 
+export type UserSecretLinkRow = {
+  user_id: number;
+  token: string | null;
+  token_hash: string;
+  pin_hash: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export type FollowedUserStatusRow = UserRow & {
   viewer_seen_at: number | null;
   subject_seen_at: number | null;
@@ -87,6 +96,16 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (subject_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS user_secret_links (
+      user_id INTEGER PRIMARY KEY,
+      token TEXT,
+      token_hash TEXT NOT NULL UNIQUE,
+      pin_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS audit_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_type TEXT NOT NULL,
@@ -95,6 +114,12 @@ export async function initDb(): Promise<void> {
       created_at INTEGER NOT NULL
     );
   `);
+
+  const secretLinkColumns = instance.prepare('PRAGMA table_info(user_secret_links)').all() as Array<{ name: string }>;
+  if (!secretLinkColumns.some((column) => column.name === 'token')) {
+    instance.prepare('ALTER TABLE user_secret_links ADD COLUMN token TEXT').run();
+  }
+  instance.prepare('CREATE UNIQUE INDEX IF NOT EXISTS user_secret_links_token_unique ON user_secret_links (token) WHERE token IS NOT NULL').run();
 
   const admin = instance.prepare('SELECT id FROM admins WHERE id = 1').get() as { id: number } | undefined;
   if (!admin) {
@@ -125,6 +150,10 @@ export function getAdmin(): AdminRow {
 
 export function findUserByIdentity(identity: string): UserRow | undefined {
   return getDb().prepare('SELECT * FROM users WHERE LOWER(identity) = LOWER(?)').get(identity) as UserRow | undefined;
+}
+
+export function findUserById(id: number): UserRow | undefined {
+  return getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
 }
 
 export function listUsers(): UserRow[] {
@@ -215,6 +244,30 @@ export function recordStatusViews(viewerId: number, subjects: UserRow[]): void {
     for (const subject of viewableSubjects) upsert.run(viewerId, subject.id, subject.last_seen_at, ts);
   });
   transaction();
+}
+
+export function getUserSecretLink(userId: number): UserSecretLinkRow | undefined {
+  return getDb().prepare('SELECT * FROM user_secret_links WHERE user_id = ?').get(userId) as UserSecretLinkRow | undefined;
+}
+
+export function findUserSecretLinkByTokenHash(tokenHash: string): UserSecretLinkRow | undefined {
+  return getDb().prepare('SELECT * FROM user_secret_links WHERE token_hash = ?').get(tokenHash) as UserSecretLinkRow | undefined;
+}
+
+export function upsertUserSecretLink(userId: number, token: string, tokenHash: string, pinHash: string): void {
+  const ts = nowMs();
+  getDb().prepare(`
+    INSERT INTO user_secret_links (user_id, token, token_hash, pin_hash, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id)
+    DO UPDATE SET token = excluded.token, token_hash = excluded.token_hash, pin_hash = excluded.pin_hash, updated_at = excluded.updated_at
+  `).run(userId, token, tokenHash, pinHash, ts, ts);
+}
+
+export function rotateUserSecretLink(userId: number, token: string, tokenHash: string): boolean {
+  const ts = nowMs();
+  const result = getDb().prepare('UPDATE user_secret_links SET token = ?, token_hash = ?, updated_at = ? WHERE user_id = ?').run(token, tokenHash, ts, userId);
+  return result.changes > 0;
 }
 
 export function listAudit(limit = 200): Array<{ id: number; event_type: string; details: string; ip: string | null; created_at: number }> {

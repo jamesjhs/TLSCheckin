@@ -2,12 +2,13 @@ import express, { Router, type Request, type Response } from 'express';
 import session from 'express-session';
 import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
+import crypto from 'node:crypto';
 import { config } from './config.js';
-import { initDb, getAdmin, recordAudit, findUserByIdentity, updateLastSeen, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb } from './db.js';
+import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, type UserRow } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
-import { adminLoginPage, adminPage, formatFollowedStatusLine, passwordChangePage, publicHomePage, resultPage } from './pages.js';
+import { adminLoginPage, adminPage, formatFollowedStatusLine, passwordChangePage, publicHomePage, secretPinPage, userLandingPage } from './pages.js';
 
 const app = express();
 
@@ -17,7 +18,7 @@ app.use('/assets', express.static('public/assets'));
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 app.use(session({
-  name: 'tlscheckin_admin',
+  name: 'tlscheckin_session',
   secret: config.sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -40,6 +41,20 @@ const adminLoginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
+
+const secretPinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 25,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+type TlsSession = typeof session.Session.prototype & {
+  adminId?: number;
+  userId?: number;
+  mustChangePassword?: boolean;
+  loggedInAt?: number;
+};
 
 function clientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || '';
@@ -72,7 +87,74 @@ function turnstileToken(req: Request): string {
   return String(body['cf-turnstile-response'] || body.turnstileToken || '');
 }
 
-app.get('/', (_req, res) => {
+function sessionData(req: Request): TlsSession {
+  return req.session as typeof req.session & TlsSession;
+}
+
+function secretTokenHash(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function generateSecretToken(): string {
+  return crypto.randomBytes(12).toString('base64url').slice(0, 15);
+}
+
+function generateUniqueSecretToken(): string {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const token = generateSecretToken();
+    if (!findUserSecretLinkByTokenHash(secretTokenHash(token))) return token;
+  }
+  throw new Error('Unable to generate a unique secret link token.');
+}
+
+function secretUrl(req: Request, token: string): string {
+  return `${req.protocol}://${req.get('host') ?? 'localhost'}/s/${token}`;
+}
+
+function buildStatusLines(user: UserRow, previousLastSeenAt: number | null): string[] {
+  const followed = getFollowedUserStatuses(user.id);
+  const lines = followed.length ? followed.map((followedUser) => formatFollowedStatusLine(followedUser, previousLastSeenAt)) : ['Login noted'];
+  recordStatusViews(user.id, followed);
+  return lines;
+}
+
+function getDisplaySecretUrl(req: Request, user: UserRow, generatedSecretUrl?: string): { hasSecretLink: boolean; displaySecretUrl?: string } {
+  if (generatedSecretUrl) return { hasSecretLink: true, displaySecretUrl: generatedSecretUrl };
+
+  const link = getUserSecretLink(user.id);
+  if (!link) return { hasSecretLink: false };
+
+  if (link.token) return { hasSecretLink: true, displaySecretUrl: secretUrl(req, link.token) };
+
+  const token = generateUniqueSecretToken();
+  rotateUserSecretLink(user.id, token, secretTokenHash(token));
+  recordAudit('user_secret_link_rotated', { user: user.identity, reason: 'stored_token_migration' }, clientIp(req));
+  return { hasSecretLink: true, displaySecretUrl: secretUrl(req, token) };
+}
+
+function renderUserLanding(req: Request, res: Response, user: UserRow, generatedSecretUrl?: string, previousLastSeenAt = user.last_seen_at): void {
+  const secretLink = getDisplaySecretUrl(req, user, generatedSecretUrl);
+  res.type('html').send(userLandingPage({
+    lines: buildStatusLines(user, previousLastSeenAt),
+    hasSecretLink: secretLink.hasSecretLink,
+    secretUrl: secretLink.displaySecretUrl
+  }));
+}
+
+async function establishUserSession(req: Request, userId: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => req.session.regenerate((err) => err ? reject(err) : resolve()));
+  const current = sessionData(req);
+  current.userId = userId;
+  current.loggedInAt = nowMs();
+}
+
+app.get('/', (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (user) {
+    renderUserLanding(req, res, user);
+    return;
+  }
   res.type('html').send(publicHomePage());
 });
 
@@ -121,11 +203,93 @@ app.post('/api/checkin', publicLimiter, async (req, res) => {
 
   const previousLastSeenAt = user.last_seen_at;
   updateLastSeen(user.id);
+  await establishUserSession(req, user.id);
   recordAudit('public_checkin_success', { user: user.identity }, ip);
-  const followed = getFollowedUserStatuses(user.id);
-  const lines = followed.length ? followed.map((followedUser) => formatFollowedStatusLine(followedUser, previousLastSeenAt)) : ['Login noted'];
-  recordStatusViews(user.id, followed);
-  res.json({ html: resultPage(lines) });
+  const secretLink = getDisplaySecretUrl(req, user);
+  res.json({
+    html: userLandingPage({
+      lines: buildStatusLines(user, previousLastSeenAt),
+      hasSecretLink: secretLink.hasSecretLink,
+      secretUrl: secretLink.displaySecretUrl
+    })
+  });
+});
+
+app.post('/api/secret-link', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    res.status(401).json({ ok: false, message: 'Login required.' });
+    return;
+  }
+
+  const pin = String(((req.body ?? {}) as Record<string, unknown>).pin || '').trim();
+  if (!/^\d{4}$/.test(pin)) {
+    res.status(400).json({ ok: false, message: 'Enter a 4-digit PIN.' });
+    return;
+  }
+
+  const token = generateUniqueSecretToken();
+  const pinHash = await bcrypt.hash(pin, 12);
+  upsertUserSecretLink(user.id, token, secretTokenHash(token), pinHash);
+  recordAudit('user_secret_link_set', { user: user.identity }, clientIp(req));
+  res.json({ ok: true, message: 'Secret link ready.', secretUrl: secretUrl(req, token) });
+});
+
+app.post('/api/secret-link/rotate', (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    res.status(401).json({ ok: false, message: 'Login required.' });
+    return;
+  }
+
+  if (!getUserSecretLink(user.id)) {
+    res.status(400).json({ ok: false, message: 'Set a PIN first.' });
+    return;
+  }
+
+  const token = generateUniqueSecretToken();
+  rotateUserSecretLink(user.id, token, secretTokenHash(token));
+  recordAudit('user_secret_link_rotated', { user: user.identity }, clientIp(req));
+  res.json({ ok: true, message: 'Secret link rotated.', secretUrl: secretUrl(req, token) });
+});
+
+app.get('/s/:token', (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[A-Za-z0-9_-]{15}$/.test(token) || !findUserSecretLinkByTokenHash(secretTokenHash(token))) {
+    res.status(404).type('text').send('Not found');
+    return;
+  }
+  res.type('html').send(secretPinPage(req.originalUrl));
+});
+
+app.post('/s/:token', secretPinLimiter, async (req, res) => {
+  const ip = clientIp(req);
+  const token = String(req.params.token || '');
+  const secretPath = req.originalUrl.split('?')[0] || `/s/${token}`;
+  const turnstile = await verifyTurnstileToken(turnstileToken(req), 'secret_pin', ip);
+  if (!turnstile.ok) {
+    recordAudit('secret_link_login_failure', { reason: 'turnstile_failed', detail: turnstile.reason }, ip);
+    res.status(403).type('html').send(secretPinPage(secretPath, 'Login failed.'));
+    return;
+  }
+
+  const link = /^[A-Za-z0-9_-]{15}$/.test(token) ? findUserSecretLinkByTokenHash(secretTokenHash(token)) : undefined;
+  const user = link ? findUserById(link.user_id) : undefined;
+  const pin = String(((req.body ?? {}) as Record<string, unknown>).pin || '');
+  const pinOk = link ? await bcrypt.compare(pin, link.pin_hash) : false;
+  if (!link || !user || !pinOk) {
+    recordAudit('secret_link_login_failure', { reason: 'bad_pin_or_link' }, ip);
+    res.status(401).type('html').send(secretPinPage(secretPath, 'Login failed.'));
+    return;
+  }
+
+  const previousLastSeenAt = user.last_seen_at;
+  updateLastSeen(user.id);
+  await establishUserSession(req, user.id);
+  recordAudit('secret_link_login_success', { user: user.identity }, ip);
+  renderUserLanding(req, res, user, undefined, previousLastSeenAt);
 });
 
 const adminRouter = Router({ mergeParams: true });
