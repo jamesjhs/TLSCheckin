@@ -38,7 +38,13 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .link-tools { width: min(520px, 88vw); margin-top: 8px; padding-top: 12px; border-top: 1px solid #ddd; }
     .link-tools form { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin: 0 0 10px; }
     .link-tools .textbox { width: 120px; }
-    .secret-url { overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; }
+    .secret-link-row { display: flex; gap: 12px; align-items: flex-start; justify-content: center; }
+    .secret-link-details { flex: 1 1 auto; min-width: 0; }
+    .secret-link-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
+    .secret-link-actions #rotate-form { margin: 0; }
+    .secret-url { display: block; width: 100%; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; }
+    .secret-url[aria-disabled="true"] { color: #777; pointer-events: none; text-decoration: none; }
+    @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: center; } }
     .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
     .admin h1, .admin h2 { font-size: 20px; margin: 18px 0 10px; }
@@ -154,15 +160,22 @@ export function userLandingPage(data: {
   <div class="stack">
     <div class="lines">${data.lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
     <section class="link-tools" aria-label="Secret link settings">
-      <form id="pin-form" autocomplete="off">
+      <form id="pin-form" method="post" action="/api/secret-link" autocomplete="off">
         <input id="pin" class="textbox" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
         <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
       </form>
-      <form id="rotate-form">
-        <button class="button" type="submit" ${data.hasSecretLink ? '' : 'disabled'}>Rotate Link</button>
-      </form>
-      <div id="link-status" class="status">${escapeHtml(data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.')}</div>
-      <div id="secret-url" class="secret-url">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</div>
+      <div class="secret-link-row">
+        <div class="secret-link-details">
+          <div id="link-status" class="status">${escapeHtml(data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.')}</div>
+          <a id="secret-url" class="secret-url" href="${data.secretUrl ? escapeHtml(data.secretUrl) : '#'}" ${data.secretUrl ? '' : 'aria-disabled="true"'} aria-label="Copy secret link">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</a>
+        </div>
+        <div class="secret-link-actions">
+          <button id="copy-link" class="button" type="button" ${data.hasSecretLink ? '' : 'disabled'}>Copy Link</button>
+          <form id="rotate-form" method="post" action="/api/secret-link/rotate">
+            <button class="button" type="submit" ${data.hasSecretLink ? '' : 'disabled'}>Rotate Link</button>
+          </form>
+        </div>
+      </div>
     </section>
     <button class="button" type="button" onclick="leave()">Exit</button>
   </div>
@@ -171,6 +184,7 @@ export function userLandingPage(data: {
 const redirectUrl = 'https://www.google.co.uk/';
 const statusBox = document.getElementById('link-status');
 const secretUrlBox = document.getElementById('secret-url');
+const copyButton = document.getElementById('copy-link');
 const rotateButton = document.querySelector('#rotate-form button');
 function leave() {
   document.documentElement.innerHTML = '';
@@ -182,9 +196,39 @@ window.addEventListener('popstate', leave);
 function showResult(result) {
   statusBox.className = result.ok ? 'status' : 'error';
   statusBox.textContent = result.message || (result.ok ? 'Saved.' : 'Unable to save.');
-  if (result.secretUrl) secretUrlBox.textContent = result.secretUrl;
+  if (result.secretUrl) {
+    secretUrlBox.textContent = result.secretUrl;
+    secretUrlBox.href = result.secretUrl;
+    secretUrlBox.removeAttribute('aria-disabled');
+    if (copyButton) copyButton.disabled = false;
+  }
   if (result.ok && rotateButton) rotateButton.disabled = false;
 }
+async function copySecretUrl(event) {
+  event.preventDefault();
+  const secretUrl = secretUrlBox.href;
+  if (!secretUrl) return;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(secretUrl);
+    } else {
+      const helper = document.createElement('textarea');
+      helper.value = secretUrl;
+      helper.setAttribute('readonly', '');
+      helper.style.position = 'fixed';
+      helper.style.left = '-9999px';
+      document.body.appendChild(helper);
+      helper.select();
+      document.execCommand('copy');
+      helper.remove();
+    }
+    showResult({ ok: true, message: 'Secret link copied.' });
+  } catch {
+    showResult({ ok: false, message: 'Unable to copy. Select the link and copy it manually.' });
+  }
+}
+secretUrlBox.addEventListener('click', copySecretUrl);
+copyButton.addEventListener('click', copySecretUrl);
 document.getElementById('pin-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const pin = document.getElementById('pin').value.trim();
