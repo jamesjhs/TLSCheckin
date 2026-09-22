@@ -48,6 +48,8 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .pin-settings summary { cursor: pointer; display: inline-block; color: #555; font-size: 13px; }
     .pin-settings summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
     .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .session-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+    .session-actions form { margin: 0; }
     @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: center; } }
     .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
@@ -188,9 +190,14 @@ export function userLandingPage(data: {
     </section>
     <section class="location-tools" aria-label="Location sharing">
       <button id="share-location" class="button" type="button">Share Location</button>
-      <div id="location-status" class="status"></div>
+      <div id="location-status" class="status" aria-live="polite"></div>
     </section>
-    <button class="button" type="button" onclick="leave()">Exit</button>
+    <div class="session-actions">
+      <form method="post" action="/logout">
+        <button class="button" type="submit">Log Out</button>
+      </form>
+      <button class="button" type="button" onclick="leave()">Exit</button>
+    </div>
   </div>
 </main>
 <script>
@@ -264,6 +271,9 @@ document.getElementById('rotate-form').addEventListener('submit', async (event) 
   showResult(response && response.ok ? await response.json() : { ok: false, message: 'Unable to rotate.' });
 });
 shareLocationButton.addEventListener('click', () => {
+  locationStatusBox.className = 'status';
+  locationStatusBox.textContent = 'Requesting location permission...';
+
   if (!navigator.geolocation) {
     locationStatusBox.className = 'error';
     locationStatusBox.textContent = 'Location is not available in this browser.';
@@ -273,31 +283,34 @@ shareLocationButton.addEventListener('click', () => {
   const mapsWindow = window.open('about:blank', '_blank');
   if (mapsWindow) mapsWindow.opener = null;
   shareLocationButton.disabled = true;
-  locationStatusBox.className = 'status';
-  locationStatusBox.textContent = 'Getting location...';
+  shareLocationButton.textContent = 'Getting Location';
 
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const lat = position.coords.latitude.toFixed(6);
-      const lng = position.coords.longitude.toFixed(6);
-      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(lat + ',' + lng);
-      if (mapsWindow) {
-        mapsWindow.location.href = mapsUrl;
-      } else {
-        window.open(mapsUrl, '_blank', 'noopener');
-      }
-      locationStatusBox.className = 'status';
-      locationStatusBox.textContent = lat + ', ' + lng;
-      shareLocationButton.disabled = false;
-    },
-    () => {
-      if (mapsWindow) mapsWindow.close();
-      locationStatusBox.className = 'error';
-      locationStatusBox.textContent = 'Unable to get location.';
-      shareLocationButton.disabled = false;
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-  );
+  window.setTimeout(() => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude.toFixed(6);
+        const lng = position.coords.longitude.toFixed(6);
+        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(lat + ',' + lng);
+        if (mapsWindow) {
+          mapsWindow.location.href = mapsUrl;
+        } else {
+          window.open(mapsUrl, '_blank', 'noopener');
+        }
+        locationStatusBox.className = 'status';
+        locationStatusBox.textContent = lat + ', ' + lng;
+        shareLocationButton.disabled = false;
+        shareLocationButton.textContent = 'Share Location';
+      },
+      (error) => {
+        if (mapsWindow) mapsWindow.close();
+        locationStatusBox.className = 'error';
+        locationStatusBox.textContent = error.code === error.PERMISSION_DENIED ? 'Location permission was denied.' : 'Unable to get location.';
+        shareLocationButton.disabled = false;
+        shareLocationButton.textContent = 'Share Location';
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, 0);
 });
 </script>`);
 }

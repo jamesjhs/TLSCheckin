@@ -297,6 +297,17 @@ app.post('/api/secret-link/rotate', (req, res) => {
   }
 });
 
+app.post('/logout', (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (user) {
+    recordAudit('user_logout', { user: user.identity }, clientIp(req));
+  }
+  req.session.destroy(() => {
+    res.redirect('/');
+  });
+});
+
 app.get('/s/:token', (req, res) => {
   const token = String(req.params.token || '');
   if (!/^[A-Za-z0-9_-]{15}$/.test(token) || !findUserSecretLinkByTokenHash(secretTokenHash(token))) {
