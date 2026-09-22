@@ -36,7 +36,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .footer a { color: #777; text-decoration: none; }
     .lines { text-align: center; line-height: 1.8; min-width: min(420px, 80vw); }
     .link-tools { width: min(520px, 88vw); margin-top: 8px; padding-top: 12px; border-top: 1px solid #ddd; }
-    .link-tools form { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin: 0 0 10px; }
+    .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin: 10px 0 0; }
     .link-tools .textbox { width: 120px; }
     .secret-link-row { display: flex; gap: 12px; align-items: flex-start; justify-content: center; }
     .secret-link-details { flex: 1 1 auto; min-width: 0; }
@@ -44,6 +44,10 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .secret-link-actions #rotate-form { margin: 0; }
     .secret-url { display: block; width: 100%; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; }
     .secret-url[aria-disabled="true"] { color: #777; pointer-events: none; text-decoration: none; }
+    .pin-settings { margin-top: 12px; }
+    .pin-settings summary { cursor: pointer; display: inline-block; color: #555; font-size: 13px; }
+    .pin-settings summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
+    .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: center; }
     @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: center; } }
     .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
@@ -162,10 +166,6 @@ export function userLandingPage(data: {
   <div class="stack">
     <div class="lines">${data.lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
     <section class="link-tools" aria-label="Secret link settings">
-      <form id="pin-form" method="post" action="/api/secret-link" autocomplete="off">
-        <input id="pin" class="textbox" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
-        <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
-      </form>
       <div class="secret-link-row">
         <div class="secret-link-details">
           <div id="link-status" class="${data.linkStatusIsError ? 'error' : 'status'}">${escapeHtml(data.linkStatus ?? (data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.'))}</div>
@@ -178,6 +178,17 @@ export function userLandingPage(data: {
           </form>
         </div>
       </div>
+      <details class="pin-settings">
+        <summary>PIN settings</summary>
+        <form id="pin-form" method="post" action="/api/secret-link" autocomplete="off">
+          <input id="pin" class="textbox" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
+          <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
+        </form>
+      </details>
+    </section>
+    <section class="location-tools" aria-label="Location sharing">
+      <button id="share-location" class="button" type="button">Share Location</button>
+      <div id="location-status" class="status"></div>
     </section>
     <button class="button" type="button" onclick="leave()">Exit</button>
   </div>
@@ -188,6 +199,8 @@ const statusBox = document.getElementById('link-status');
 const secretUrlBox = document.getElementById('secret-url');
 const copyButton = document.getElementById('copy-link');
 const rotateButton = document.querySelector('#rotate-form button');
+const shareLocationButton = document.getElementById('share-location');
+const locationStatusBox = document.getElementById('location-status');
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
@@ -249,6 +262,42 @@ document.getElementById('rotate-form').addEventListener('submit', async (event) 
   event.preventDefault();
   const response = await fetch('/api/secret-link/rotate', { method: 'POST' }).catch(() => null);
   showResult(response && response.ok ? await response.json() : { ok: false, message: 'Unable to rotate.' });
+});
+shareLocationButton.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    locationStatusBox.className = 'error';
+    locationStatusBox.textContent = 'Location is not available in this browser.';
+    return;
+  }
+
+  const mapsWindow = window.open('about:blank', '_blank');
+  if (mapsWindow) mapsWindow.opener = null;
+  shareLocationButton.disabled = true;
+  locationStatusBox.className = 'status';
+  locationStatusBox.textContent = 'Getting location...';
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude.toFixed(6);
+      const lng = position.coords.longitude.toFixed(6);
+      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(lat + ',' + lng);
+      if (mapsWindow) {
+        mapsWindow.location.href = mapsUrl;
+      } else {
+        window.open(mapsUrl, '_blank', 'noopener');
+      }
+      locationStatusBox.className = 'status';
+      locationStatusBox.textContent = lat + ', ' + lng;
+      shareLocationButton.disabled = false;
+    },
+    () => {
+      if (mapsWindow) mapsWindow.close();
+      locationStatusBox.className = 'error';
+      locationStatusBox.textContent = 'Unable to get location.';
+      shareLocationButton.disabled = false;
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
 });
 </script>`);
 }

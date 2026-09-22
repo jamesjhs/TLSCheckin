@@ -258,9 +258,9 @@ app.post('/api/secret-link', async (req, res) => {
   recordAudit('user_secret_link_set', { user: user.identity }, clientIp(req));
   const url = secretUrl(req, token);
   if (wantsJson(req)) {
-    res.json({ ok: true, message: 'Secret link ready.', secretUrl: url });
+    res.json({ ok: true, message: 'Your quick login link', secretUrl: url });
   } else {
-    renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link ready.');
+    renderUserLanding(req, res, user, url, user.last_seen_at, 'Your quick login link');
   }
 });
 
