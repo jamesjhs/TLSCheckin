@@ -154,6 +154,8 @@ export function userLandingPage(data: {
   lines: string[];
   hasSecretLink: boolean;
   secretUrl?: string;
+  linkStatus?: string;
+  linkStatusIsError?: boolean;
 }): string {
   return basePage('TLSCheckin', `
 <main class="center">
@@ -166,7 +168,7 @@ export function userLandingPage(data: {
       </form>
       <div class="secret-link-row">
         <div class="secret-link-details">
-          <div id="link-status" class="status">${escapeHtml(data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.')}</div>
+          <div id="link-status" class="${data.linkStatusIsError ? 'error' : 'status'}">${escapeHtml(data.linkStatus ?? (data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.'))}</div>
           <a id="secret-url" class="secret-url" href="${data.secretUrl ? escapeHtml(data.secretUrl) : '#'}" ${data.secretUrl ? '' : 'aria-disabled="true"'} aria-label="Copy secret link">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</a>
         </div>
         <div class="secret-link-actions">

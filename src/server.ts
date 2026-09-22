@@ -132,12 +132,26 @@ function getDisplaySecretUrl(req: Request, user: UserRow, generatedSecretUrl?: s
   return { hasSecretLink: true, displaySecretUrl: secretUrl(req, token) };
 }
 
-function renderUserLanding(req: Request, res: Response, user: UserRow, generatedSecretUrl?: string, previousLastSeenAt = user.last_seen_at): void {
+function wantsJson(req: Request): boolean {
+  return req.is('application/json') === 'application/json' || req.accepts(['html', 'json']) === 'json';
+}
+
+function renderUserLanding(
+  req: Request,
+  res: Response,
+  user: UserRow,
+  generatedSecretUrl?: string,
+  previousLastSeenAt = user.last_seen_at,
+  linkStatus?: string,
+  linkStatusIsError = false
+): void {
   const secretLink = getDisplaySecretUrl(req, user, generatedSecretUrl);
   res.type('html').send(userLandingPage({
     lines: buildStatusLines(user, previousLastSeenAt),
     hasSecretLink: secretLink.hasSecretLink,
-    secretUrl: secretLink.displaySecretUrl
+    secretUrl: secretLink.displaySecretUrl,
+    linkStatus,
+    linkStatusIsError
   }));
 }
 
@@ -219,13 +233,22 @@ app.post('/api/secret-link', async (req, res) => {
   const userId = sessionData(req).userId;
   const user = userId ? findUserById(userId) : undefined;
   if (!user) {
-    res.status(401).json({ ok: false, message: 'Login required.' });
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
     return;
   }
 
   const pin = String(((req.body ?? {}) as Record<string, unknown>).pin || '').trim();
   if (!/^\d{4}$/.test(pin)) {
-    res.status(400).json({ ok: false, message: 'Enter a 4-digit PIN.' });
+    if (wantsJson(req)) {
+      res.status(400).json({ ok: false, message: 'Enter a 4-digit PIN.' });
+    } else {
+      res.status(400);
+      renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Enter a 4-digit PIN.', true);
+    }
     return;
   }
 
@@ -233,26 +256,45 @@ app.post('/api/secret-link', async (req, res) => {
   const pinHash = await bcrypt.hash(pin, 12);
   upsertUserSecretLink(user.id, token, secretTokenHash(token), pinHash);
   recordAudit('user_secret_link_set', { user: user.identity }, clientIp(req));
-  res.json({ ok: true, message: 'Secret link ready.', secretUrl: secretUrl(req, token) });
+  const url = secretUrl(req, token);
+  if (wantsJson(req)) {
+    res.json({ ok: true, message: 'Secret link ready.', secretUrl: url });
+  } else {
+    renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link ready.');
+  }
 });
 
 app.post('/api/secret-link/rotate', (req, res) => {
   const userId = sessionData(req).userId;
   const user = userId ? findUserById(userId) : undefined;
   if (!user) {
-    res.status(401).json({ ok: false, message: 'Login required.' });
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
     return;
   }
 
   if (!getUserSecretLink(user.id)) {
-    res.status(400).json({ ok: false, message: 'Set a PIN first.' });
+    if (wantsJson(req)) {
+      res.status(400).json({ ok: false, message: 'Set a PIN first.' });
+    } else {
+      res.status(400);
+      renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Set a PIN first.', true);
+    }
     return;
   }
 
   const token = generateUniqueSecretToken();
   rotateUserSecretLink(user.id, token, secretTokenHash(token));
   recordAudit('user_secret_link_rotated', { user: user.identity }, clientIp(req));
-  res.json({ ok: true, message: 'Secret link rotated.', secretUrl: secretUrl(req, token) });
+  const url = secretUrl(req, token);
+  if (wantsJson(req)) {
+    res.json({ ok: true, message: 'Secret link rotated.', secretUrl: url });
+  } else {
+    renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link rotated.');
+  }
 });
 
 app.get('/s/:token', (req, res) => {
