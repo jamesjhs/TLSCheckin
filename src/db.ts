@@ -13,6 +13,8 @@ export type UserRow = {
   id: number;
   identity: string;
   last_seen_at: number | null;
+  phone_number: string | null;
+  ack_sms_enabled: number;
   created_at: number;
   updated_at: number;
 };
@@ -43,6 +45,21 @@ export type AdminRow = {
   updated_at: number;
 };
 
+export type SmsSettings = {
+  accessKey: string;
+  secretKey: string;
+  senderId: string;
+};
+
+export type AcknowledgementSmsCandidate = {
+  subjectId: number;
+  subjectIdentity: string;
+  viewerId: number;
+  viewerIdentity: string;
+  subjectSeenAt: number;
+  phoneNumber: string;
+};
+
 function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -71,6 +88,8 @@ export async function initDb(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       identity TEXT NOT NULL,
       last_seen_at INTEGER,
+      phone_number TEXT,
+      ack_sms_enabled INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -118,6 +137,28 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS acknowledgement_sms_notifications (
+      subject_id INTEGER NOT NULL,
+      viewer_id INTEGER NOT NULL,
+      subject_seen_at INTEGER NOT NULL,
+      phone_number TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_message_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (subject_id, viewer_id, subject_seen_at),
+      FOREIGN KEY (subject_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (viewer_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS audit_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_type TEXT NOT NULL,
@@ -132,6 +173,14 @@ export async function initDb(): Promise<void> {
     instance.prepare('ALTER TABLE user_secret_links ADD COLUMN token TEXT').run();
   }
   instance.prepare('CREATE UNIQUE INDEX IF NOT EXISTS user_secret_links_token_unique ON user_secret_links (token) WHERE token IS NOT NULL').run();
+
+  const userColumns = instance.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userColumns.some((column) => column.name === 'phone_number')) {
+    instance.prepare('ALTER TABLE users ADD COLUMN phone_number TEXT').run();
+  }
+  if (!userColumns.some((column) => column.name === 'ack_sms_enabled')) {
+    instance.prepare('ALTER TABLE users ADD COLUMN ack_sms_enabled INTEGER NOT NULL DEFAULT 0').run();
+  }
 
   const admin = instance.prepare('SELECT id FROM admins WHERE id = 1').get() as { id: number } | undefined;
   if (!admin) {
@@ -177,6 +226,12 @@ export function createUser(identity: string): UserRow {
   const database = getDb();
   const result = database.prepare('INSERT INTO users (identity, created_at, updated_at) VALUES (?, ?, ?)').run(identity, ts, ts);
   return database.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid) as UserRow;
+}
+
+export function updateUserSmsPreferences(userId: number, phoneNumber: string | null, ackSmsEnabled: boolean): void {
+  const ts = nowMs();
+  getDb().prepare('UPDATE users SET phone_number = ?, ack_sms_enabled = ?, updated_at = ? WHERE id = ?')
+    .run(phoneNumber, ackSmsEnabled ? 1 : 0, ts, userId);
 }
 
 export function deleteUser(id: number): UserRow | undefined {
@@ -255,20 +310,97 @@ export function upsertUserLocation(userId: number, latitude: number, longitude: 
   `).run(userId, latitude, longitude, ts, ts);
 }
 
-export function recordStatusViews(viewerId: number, subjects: UserRow[]): void {
+export function recordStatusViews(viewerId: number, subjects: UserRow[]): AcknowledgementSmsCandidate[] {
   const viewableSubjects = subjects.filter((subject) => subject.id !== viewerId && subject.last_seen_at !== null);
-  if (viewableSubjects.length === 0) return;
+  if (viewableSubjects.length === 0) return [];
 
   const database = getDb();
   const ts = nowMs();
+  const viewer = database.prepare('SELECT identity FROM users WHERE id = ?').get(viewerId) as { identity: string } | undefined;
+  const candidates: AcknowledgementSmsCandidate[] = [];
   const transaction = database.transaction(() => {
+    const previousStatus = database.prepare('SELECT subject_seen_at FROM status_views WHERE viewer_id = ? AND subject_id = ?');
     const upsert = database.prepare(`
       INSERT INTO status_views (viewer_id, subject_id, subject_seen_at, viewed_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(viewer_id, subject_id)
       DO UPDATE SET subject_seen_at = excluded.subject_seen_at, viewed_at = excluded.viewed_at
     `);
-    for (const subject of viewableSubjects) upsert.run(viewerId, subject.id, subject.last_seen_at, ts);
+    for (const subject of viewableSubjects) {
+      const lastSeenAt = subject.last_seen_at;
+      if (lastSeenAt === null) continue;
+      const previous = previousStatus.get(viewerId, subject.id) as { subject_seen_at: number } | undefined;
+      if (
+        subject.ack_sms_enabled === 1 &&
+        subject.phone_number &&
+        viewer &&
+        (!previous || previous.subject_seen_at < lastSeenAt)
+      ) {
+        candidates.push({
+          subjectId: subject.id,
+          subjectIdentity: subject.identity,
+          viewerId,
+          viewerIdentity: viewer.identity,
+          subjectSeenAt: lastSeenAt,
+          phoneNumber: subject.phone_number
+        });
+      }
+      upsert.run(viewerId, subject.id, lastSeenAt, ts);
+    }
+  });
+  transaction();
+  return candidates;
+}
+
+export function claimAcknowledgementSms(candidate: AcknowledgementSmsCandidate, message: string): boolean {
+  const ts = nowMs();
+  const result = getDb().prepare(`
+    INSERT OR IGNORE INTO acknowledgement_sms_notifications
+      (subject_id, viewer_id, subject_seen_at, phone_number, message, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+  `).run(candidate.subjectId, candidate.viewerId, candidate.subjectSeenAt, candidate.phoneNumber, message, ts, ts);
+  return result.changes > 0;
+}
+
+export function markAcknowledgementSmsSent(candidate: AcknowledgementSmsCandidate, providerMessageId?: string): void {
+  getDb().prepare(`
+    UPDATE acknowledgement_sms_notifications
+    SET status = 'sent', provider_message_id = ?, error = NULL, updated_at = ?
+    WHERE subject_id = ? AND viewer_id = ? AND subject_seen_at = ?
+  `).run(providerMessageId ?? null, nowMs(), candidate.subjectId, candidate.viewerId, candidate.subjectSeenAt);
+}
+
+export function markAcknowledgementSmsFailed(candidate: AcknowledgementSmsCandidate, error: string): void {
+  getDb().prepare(`
+    UPDATE acknowledgement_sms_notifications
+    SET status = 'failed', error = ?, updated_at = ?
+    WHERE subject_id = ? AND viewer_id = ? AND subject_seen_at = ?
+  `).run(error.slice(0, 500), nowMs(), candidate.subjectId, candidate.viewerId, candidate.subjectSeenAt);
+}
+
+export function getSmsSettings(): SmsSettings {
+  const rows = getDb().prepare("SELECT key, value FROM app_settings WHERE key IN ('intellisoftware_access_key', 'intellisoftware_secret_key', 'intellisoftware_sender_id')")
+    .all() as Array<{ key: string; value: string }>;
+  const settings = new Map(rows.map((row) => [row.key, row.value]));
+  return {
+    accessKey: settings.get('intellisoftware_access_key') ?? '',
+    secretKey: settings.get('intellisoftware_secret_key') ?? '',
+    senderId: settings.get('intellisoftware_sender_id') ?? ''
+  };
+}
+
+export function updateSmsSettings(settings: SmsSettings): void {
+  const database = getDb();
+  const ts = nowMs();
+  const upsert = database.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  const transaction = database.transaction(() => {
+    upsert.run('intellisoftware_access_key', settings.accessKey, ts);
+    upsert.run('intellisoftware_secret_key', settings.secretKey, ts);
+    upsert.run('intellisoftware_sender_id', settings.senderId, ts);
   });
   transaction();
 }

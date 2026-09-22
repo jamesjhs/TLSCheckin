@@ -4,11 +4,12 @@ import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { config } from './config.js';
-import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, type UserRow } from './db.js';
+import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, updateUserSmsPreferences, claimAcknowledgementSms, markAcknowledgementSmsSent, markAcknowledgementSmsFailed, getSmsSettings, updateSmsSettings, type AcknowledgementSmsCandidate, type UserRow } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
 import { adminLoginPage, adminPage, formatFollowedStatusLine, passwordChangePage, publicHomePage, secretPinPage, userLandingPage } from './pages.js';
+import { ACKNOWLEDGEMENT_SMS_TEXT, normalizeInternationalPhoneNumber, sendAcknowledgementSms } from './sms.js';
 
 const app = express();
 
@@ -111,11 +112,45 @@ function secretUrl(req: Request, token: string): string {
   return `${req.protocol}://${req.get('host') ?? 'localhost'}/s/${token}`;
 }
 
-function buildStatusLines(user: UserRow, previousLastSeenAt: number | null): string[] {
+function buildStatusLines(user: UserRow, previousLastSeenAt: number | null): { lines: string[]; smsCandidates: AcknowledgementSmsCandidate[] } {
   const followed = getFollowedUserStatuses(user.id);
   const lines = followed.length ? followed.map((followedUser) => formatFollowedStatusLine(followedUser, previousLastSeenAt)) : ['Login noted'];
-  recordStatusViews(user.id, followed);
-  return lines;
+  return { lines, smsCandidates: recordStatusViews(user.id, followed) };
+}
+
+async function sendAcknowledgementSmsMessages(candidates: AcknowledgementSmsCandidate[], ip: string): Promise<void> {
+  if (candidates.length === 0) return;
+
+  const settings = getSmsSettings();
+  for (const candidate of candidates) {
+    if (!claimAcknowledgementSms(candidate, ACKNOWLEDGEMENT_SMS_TEXT)) continue;
+
+    try {
+      const result = await sendAcknowledgementSms(settings, candidate.phoneNumber);
+      if (result.ok) {
+        markAcknowledgementSmsSent(candidate, result.providerMessageId);
+        recordAudit('acknowledgement_sms_sent', {
+          user: candidate.subjectIdentity,
+          acknowledged_by: candidate.viewerIdentity
+        }, ip);
+      } else {
+        markAcknowledgementSmsFailed(candidate, result.error);
+        recordAudit('acknowledgement_sms_failed', {
+          user: candidate.subjectIdentity,
+          acknowledged_by: candidate.viewerIdentity,
+          reason: result.error
+        }, ip);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown SMS send failure.';
+      markAcknowledgementSmsFailed(candidate, message);
+      recordAudit('acknowledgement_sms_failed', {
+        user: candidate.subjectIdentity,
+        acknowledged_by: candidate.viewerIdentity,
+        reason: message
+      }, ip);
+    }
+  }
 }
 
 function getDisplaySecretUrl(req: Request, user: UserRow, generatedSecretUrl?: string): { hasSecretLink: boolean; displaySecretUrl?: string } {
@@ -136,22 +171,31 @@ function wantsJson(req: Request): boolean {
   return req.is('application/json') === 'application/json' || req.accepts(['html', 'json']) === 'json';
 }
 
-function renderUserLanding(
+async function renderUserLanding(
   req: Request,
   res: Response,
   user: UserRow,
   generatedSecretUrl?: string,
   previousLastSeenAt = user.last_seen_at,
   linkStatus?: string,
-  linkStatusIsError = false
-): void {
+  linkStatusIsError = false,
+  smsStatus?: string,
+  smsStatusIsError = false
+): Promise<void> {
   const secretLink = getDisplaySecretUrl(req, user, generatedSecretUrl);
+  const status = buildStatusLines(user, previousLastSeenAt);
+  await sendAcknowledgementSmsMessages(status.smsCandidates, clientIp(req));
   res.type('html').send(userLandingPage({
-    lines: buildStatusLines(user, previousLastSeenAt),
+    lines: status.lines,
     hasSecretLink: secretLink.hasSecretLink,
     secretUrl: secretLink.displaySecretUrl,
     linkStatus,
-    linkStatusIsError
+    linkStatusIsError,
+    phoneNumber: user.phone_number ?? '',
+    ackSmsEnabled: user.ack_sms_enabled === 1,
+    smsPreviewText: ACKNOWLEDGEMENT_SMS_TEXT,
+    smsStatus,
+    smsStatusIsError
   }));
 }
 
@@ -162,11 +206,11 @@ async function establishUserSession(req: Request, userId: number): Promise<void>
   current.loggedInAt = nowMs();
 }
 
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
   const userId = sessionData(req).userId;
   const user = userId ? findUserById(userId) : undefined;
   if (user) {
-    renderUserLanding(req, res, user);
+    await renderUserLanding(req, res, user);
     return;
   }
   res.type('html').send(publicHomePage());
@@ -220,11 +264,16 @@ app.post('/api/checkin', publicLimiter, async (req, res) => {
   await establishUserSession(req, user.id);
   recordAudit('public_checkin_success', { user: user.identity }, ip);
   const secretLink = getDisplaySecretUrl(req, user);
+  const status = buildStatusLines(user, previousLastSeenAt);
+  await sendAcknowledgementSmsMessages(status.smsCandidates, ip);
   res.json({
     html: userLandingPage({
-      lines: buildStatusLines(user, previousLastSeenAt),
+      lines: status.lines,
       hasSecretLink: secretLink.hasSecretLink,
-      secretUrl: secretLink.displaySecretUrl
+      secretUrl: secretLink.displaySecretUrl,
+      phoneNumber: user.phone_number ?? '',
+      ackSmsEnabled: user.ack_sms_enabled === 1,
+      smsPreviewText: ACKNOWLEDGEMENT_SMS_TEXT
     })
   });
 });
@@ -247,7 +296,7 @@ app.post('/api/secret-link', async (req, res) => {
       res.status(400).json({ ok: false, message: 'Enter a 4-digit PIN.' });
     } else {
       res.status(400);
-      renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Enter a 4-digit PIN.', true);
+      await renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Enter a 4-digit PIN.', true);
     }
     return;
   }
@@ -260,11 +309,11 @@ app.post('/api/secret-link', async (req, res) => {
   if (wantsJson(req)) {
     res.json({ ok: true, message: 'Your quick login link', secretUrl: url });
   } else {
-    renderUserLanding(req, res, user, url, user.last_seen_at, 'Your quick login link');
+    await renderUserLanding(req, res, user, url, user.last_seen_at, 'Your quick login link');
   }
 });
 
-app.post('/api/secret-link/rotate', (req, res) => {
+app.post('/api/secret-link/rotate', async (req, res) => {
   const userId = sessionData(req).userId;
   const user = userId ? findUserById(userId) : undefined;
   if (!user) {
@@ -281,7 +330,7 @@ app.post('/api/secret-link/rotate', (req, res) => {
       res.status(400).json({ ok: false, message: 'Set a PIN first.' });
     } else {
       res.status(400);
-      renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Set a PIN first.', true);
+      await renderUserLanding(req, res, user, undefined, user.last_seen_at, 'Set a PIN first.', true);
     }
     return;
   }
@@ -293,8 +342,58 @@ app.post('/api/secret-link/rotate', (req, res) => {
   if (wantsJson(req)) {
     res.json({ ok: true, message: 'Secret link rotated.', secretUrl: url });
   } else {
-    renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link rotated.');
+    await renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link rotated.');
   }
+});
+
+app.post('/api/sms-preferences', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+  const currentUser = user;
+
+  async function respond(statusCode: number, result: { ok: boolean; message: string; phoneNumber?: string; ackSmsEnabled?: boolean }): Promise<void> {
+    if (wantsJson(req)) {
+      res.status(statusCode).json(result);
+      return;
+    }
+
+    const refreshedUser = findUserById(currentUser.id) ?? currentUser;
+    res.status(statusCode);
+    await renderUserLanding(req, res, refreshedUser, undefined, refreshedUser.last_seen_at, undefined, false, result.message, !result.ok);
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const ackSmsEnabled = body.ackSmsEnabled === true || body.ackSmsEnabled === 'on' || body.ackSmsEnabled === 'true' || body.ackSmsEnabled === '1';
+  const normalized = normalizeInternationalPhoneNumber(body.phoneNumber);
+  if (!normalized.ok) {
+    await respond(400, { ok: false, message: normalized.message });
+    return;
+  }
+  if (ackSmsEnabled && !normalized.phoneNumber) {
+    await respond(400, { ok: false, message: 'Enter a phone number to receive acknowledgement texts.' });
+    return;
+  }
+
+  updateUserSmsPreferences(user.id, normalized.phoneNumber || null, ackSmsEnabled);
+  recordAudit('user_sms_preferences_updated', {
+    user: user.identity,
+    ack_sms_enabled: ackSmsEnabled,
+    phone_present: Boolean(normalized.phoneNumber)
+  }, clientIp(req));
+  await respond(200, {
+    ok: true,
+    message: ackSmsEnabled ? 'SMS acknowledgements enabled.' : 'SMS acknowledgements disabled.',
+    phoneNumber: normalized.phoneNumber,
+    ackSmsEnabled
+  });
 });
 
 app.post('/api/location', (req, res) => {
@@ -362,7 +461,7 @@ app.post('/s/:token', secretPinLimiter, async (req, res) => {
   updateLastSeen(user.id);
   await establishUserSession(req, user.id);
   recordAudit('secret_link_login_success', { user: user.identity }, ip);
-  renderUserLanding(req, res, user, undefined, previousLastSeenAt);
+  await renderUserLanding(req, res, user, undefined, previousLastSeenAt);
 });
 
 const adminRouter = Router({ mergeParams: true });
@@ -468,6 +567,26 @@ adminRouter.post('/change-password', requireAdminPage, async (req, res) => {
   res.redirect(adminPath);
 });
 
+adminRouter.post('/sms-settings', requireAdmin, (req, res) => {
+  const current = getSmsSettings();
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const accessKey = String(body.accessKey ?? '').trim();
+  const secretKey = String(body.secretKey ?? '').trim();
+  const senderId = String(body.senderId ?? '').trim();
+
+  updateSmsSettings({
+    accessKey,
+    secretKey: secretKey || current.secretKey,
+    senderId
+  });
+  recordAudit('intellisoftware_settings_updated', {
+    access_key_present: Boolean(accessKey),
+    secret_key_present: Boolean(secretKey || current.secretKey),
+    sender_id_present: Boolean(senderId)
+  }, clientIp(req));
+  res.redirect(currentAdminPath(req));
+});
+
 adminRouter.post('/logout', requireAdmin, (req, res) => {
   req.session.destroy(() => {
     res.redirect(currentAdminPath(req));
@@ -520,7 +639,8 @@ function renderAdmin(req: Request, res: Response): void {
     adminPath: currentAdminPath(req),
     users,
     followedByUser,
-    audit: listAudit(200)
+    audit: listAudit(200),
+    smsSettings: getSmsSettings()
   }));
 }
 

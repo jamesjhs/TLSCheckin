@@ -1,6 +1,6 @@
 import { getTurnstileConfig } from './turnstile.js';
 import { formatLocalFooter, formatLocalShort } from './time.js';
-import type { FollowedUserStatusRow, UserRow } from './db.js';
+import type { FollowedUserStatusRow, SmsSettings, UserRow } from './db.js';
 
 function escapeHtml(value: string): string {
   return value
@@ -53,11 +53,18 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .button:disabled { opacity: .55; cursor: default; }
     .footer { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; color: #777; font-size: 13px; }
     .footer a { color: #777; text-decoration: none; }
-    .lines { text-align: center; line-height: 1.8; min-width: min(420px, 80vw); }
-    .link-tools { width: min(520px, 88vw); margin-top: 8px; padding-top: 12px; border-top: 1px solid #ddd; }
-    .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; margin: 10px 0 0; }
+    .landing-center { align-items: flex-start; padding-top: 28px; padding-bottom: 28px; }
+    .landing-stack { width: min(680px, 94vw); align-items: stretch; text-align: left; }
+    .landing-section { border: 1px solid #ddd; border-radius: 4px; background: #fff; }
+    .landing-section summary { cursor: pointer; padding: 12px 14px; font-weight: 700; }
+    .landing-section summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
+    .section-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .section-help { margin: 0; color: #555; font-size: 14px; line-height: 1.45; }
+    .lines { text-align: left; line-height: 1.8; min-width: 0; }
+    .link-tools { width: 100%; }
+    .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 0; }
     .link-tools .textbox { width: 120px; }
-    .secret-link-row { display: flex; gap: 12px; align-items: flex-start; justify-content: center; }
+    .secret-link-row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
     .secret-link-details { flex: 1 1 auto; min-width: 0; }
     .secret-link-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
     .secret-link-actions #rotate-form { margin: 0; }
@@ -66,10 +73,15 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .pin-settings { margin-top: 12px; }
     .pin-settings summary { cursor: pointer; display: inline-block; color: #555; font-size: 13px; }
     .pin-settings summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
-    .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: center; }
-    .session-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+    .sms-tools { width: 100%; }
+    .sms-tools form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .sms-tools .textbox { width: min(220px, 74vw); }
+    .sms-choice { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: #333; }
+    .sms-preview { width: 100%; font-size: 13px; color: #555; line-height: 1.45; }
+    .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .session-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .session-actions form { margin: 0; }
-    @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: center; } }
+    @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: stretch; } }
     .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
     .admin h1, .admin h2 { font-size: 20px; margin: 18px 0 10px; }
@@ -93,10 +105,10 @@ export function publicHomePage(): string {
   const footer = formatLocalFooter();
   return basePage('TLSCheckin', `
 <main class="center">
-  <form id="checkin-form" class="stack" autocomplete="off">
+  <form id="checkin-form" class="stack" autocomplete="off" autocapitalize="off" spellcheck="false">
     <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
     <input id="user" class="textbox" name="user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="User" aria-label="User">
-    <input id="secret" class="textbox" name="secret" type="password" autocomplete="off" inputmode="numeric" placeholder="Secret" aria-label="Secret">
+    <input id="secret" class="textbox" name="secret" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Secret" aria-label="Secret">
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="checkin" data-theme="light" data-callback="onCheckinTurnstileSuccess" data-expired-callback="onCheckinTurnstileExpired" data-error-callback="onCheckinTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="status">${turnstile.enabled ? 'Waiting for Turnstile.' : ''}</div>
@@ -181,42 +193,93 @@ export function userLandingPage(data: {
   secretUrl?: string;
   linkStatus?: string;
   linkStatusIsError?: boolean;
+  phoneNumber?: string;
+  ackSmsEnabled?: boolean;
+  smsPreviewText: string;
+  smsStatus?: string;
+  smsStatusIsError?: boolean;
 }): string {
   return basePage('TLSCheckin', `
-<main class="center">
-  <div class="stack">
-    <div class="lines">${data.lines.map((line) => `<div>${renderLine(line)}</div>`).join('')}</div>
-    <section class="link-tools" aria-label="Secret link settings">
-      <div class="secret-link-row">
-        <div class="secret-link-details">
-          <div id="link-status" class="${data.linkStatusIsError ? 'error' : 'status'}">${escapeHtml(data.linkStatus ?? (data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.'))}</div>
-          <a id="secret-url" class="secret-url" href="${data.secretUrl ? escapeHtml(data.secretUrl) : '#'}" ${data.secretUrl ? '' : 'aria-disabled="true"'} aria-label="Copy secret link">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</a>
-        </div>
-        <div class="secret-link-actions">
-          <button id="copy-link" class="button" type="button" ${data.hasSecretLink ? '' : 'disabled'}>Copy Link</button>
-          <form id="rotate-form" method="post" action="/api/secret-link/rotate">
-            <button class="button" type="submit" ${data.hasSecretLink ? '' : 'disabled'}>Rotate Link</button>
+<main class="center landing-center">
+  <div class="stack landing-stack">
+    <details class="landing-section" open>
+      <summary>Status and Seen</summary>
+      <div class="section-body">
+        <p class="section-help">Your check-in has been recorded. This section shows the latest status for the people you follow, including whether they have seen your current check-in.</p>
+        <div class="lines">${data.lines.map((line) => `<div>${renderLine(line)}</div>`).join('')}</div>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>Secret Link</summary>
+      <div class="section-body">
+        <p class="section-help">Create or update a four-digit PIN to use a quick login link. Copy the link for reuse, or rotate it to replace the old link with a new one.</p>
+        <section class="link-tools" aria-label="Secret link settings">
+          <div class="secret-link-row">
+            <div class="secret-link-details">
+              <div id="link-status" class="${data.linkStatusIsError ? 'error' : 'status'}">${escapeHtml(data.linkStatus ?? (data.hasSecretLink ? 'Secret link configured.' : 'Set a PIN to create a secret link.'))}</div>
+              <a id="secret-url" class="secret-url" href="${data.secretUrl ? escapeHtml(data.secretUrl) : '#'}" ${data.secretUrl ? '' : 'aria-disabled="true"'} aria-label="Copy secret link">${data.secretUrl ? escapeHtml(data.secretUrl) : ''}</a>
+            </div>
+            <div class="secret-link-actions">
+              <button id="copy-link" class="button" type="button" ${data.hasSecretLink ? '' : 'disabled'}>Copy Link</button>
+              <form id="rotate-form" method="post" action="/api/secret-link/rotate">
+                <button class="button" type="submit" ${data.hasSecretLink ? '' : 'disabled'}>Rotate Link</button>
+              </form>
+            </div>
+          </div>
+          <details class="pin-settings" open>
+            <summary>PIN settings</summary>
+            <form id="pin-form" method="post" action="/api/secret-link" autocomplete="off">
+              <input id="pin" class="textbox" name="pin" type="password" autocomplete="new-password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
+              <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
+            </form>
+          </details>
+        </section>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>SMS Receipts</summary>
+      <div class="section-body">
+        <p class="section-help">Add your mobile number in international format and tick the box if you want a text when someone acknowledges your current check-in.</p>
+        <section class="sms-tools" aria-label="Acknowledgement text settings">
+          <form id="sms-form" method="post" action="/api/sms-preferences" autocomplete="off">
+            <input id="sms-phone" class="textbox" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="+447710123456" aria-label="International phone number" value="${escapeHtml(data.phoneNumber ?? '')}">
+            <label class="sms-choice">
+              <input id="ack-sms-enabled" name="ackSmsEnabled" type="checkbox" ${data.ackSmsEnabled ? 'checked' : ''}>
+              Receive acknowledgement texts
+            </label>
+            <button class="button" type="submit">Save</button>
+            <div class="sms-preview">Preview: ${escapeHtml(data.smsPreviewText)}</div>
           </form>
+          <div id="sms-status" class="${data.smsStatusIsError ? 'error' : 'status'}" aria-live="polite">${escapeHtml(data.smsStatus ?? '')}</div>
+        </section>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>Location Sharing</summary>
+      <div class="section-body">
+        <p class="section-help">Share your current browser location when you want the people who follow you to see a map link with your latest check-in status.</p>
+        <section class="location-tools" aria-label="Location sharing">
+          <button id="share-location" class="button" type="button">Share Location</button>
+          <div id="location-status" class="status" aria-live="polite"></div>
+        </section>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>Logout/Exit</summary>
+      <div class="section-body">
+        <p class="section-help">Log out to end this TLSCheckin session, or use Exit to blank the page and leave quickly.</p>
+        <div class="session-actions">
+          <form method="post" action="/logout">
+            <button class="button" type="submit">Log Out</button>
+          </form>
+          <button class="button" type="button" onclick="leave()">Exit</button>
         </div>
       </div>
-      <details class="pin-settings">
-        <summary>PIN settings</summary>
-        <form id="pin-form" method="post" action="/api/secret-link" autocomplete="off">
-          <input id="pin" class="textbox" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" required>
-          <button class="button" type="submit">${data.hasSecretLink ? 'Update PIN' : 'Create Link'}</button>
-        </form>
-      </details>
-    </section>
-    <section class="location-tools" aria-label="Location sharing">
-      <button id="share-location" class="button" type="button">Share Location</button>
-      <div id="location-status" class="status" aria-live="polite"></div>
-    </section>
-    <div class="session-actions">
-      <form method="post" action="/logout">
-        <button class="button" type="submit">Log Out</button>
-      </form>
-      <button class="button" type="button" onclick="leave()">Exit</button>
-    </div>
+    </details>
   </div>
 </main>
 <script>
@@ -227,6 +290,7 @@ const copyButton = document.getElementById('copy-link');
 const rotateButton = document.querySelector('#rotate-form button');
 const shareLocationButton = document.getElementById('share-location');
 const locationStatusBox = document.getElementById('location-status');
+const smsStatusBox = document.getElementById('sms-status');
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
@@ -289,6 +353,20 @@ document.getElementById('rotate-form').addEventListener('submit', async (event) 
   const response = await fetch('/api/secret-link/rotate', { method: 'POST' }).catch(() => null);
   showResult(response && response.ok ? await response.json() : { ok: false, message: 'Unable to rotate.' });
 });
+document.getElementById('sms-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const phoneNumber = document.getElementById('sms-phone').value.trim();
+  const ackSmsEnabled = document.getElementById('ack-sms-enabled').checked;
+  const response = await fetch('/api/sms-preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumber, ackSmsEnabled })
+  }).catch(() => null);
+  const result = response && response.ok ? await response.json() : response ? await response.json().catch(() => ({ ok: false, message: 'Unable to save SMS settings.' })) : { ok: false, message: 'Unable to save SMS settings.' };
+  smsStatusBox.className = result.ok ? 'status' : 'error';
+  smsStatusBox.textContent = result.message || (result.ok ? 'SMS settings saved.' : 'Unable to save SMS settings.');
+  if (result.ok && result.phoneNumber !== undefined) document.getElementById('sms-phone').value = result.phoneNumber;
+});
 shareLocationButton.addEventListener('click', () => {
   locationStatusBox.className = 'status';
   locationStatusBox.textContent = 'Requesting location permission...';
@@ -347,9 +425,9 @@ export function secretPinPage(secretPath: string, error = ''): string {
   const turnstile = getTurnstileConfig();
   return basePage('TLSCheckin', `
 <main class="center">
-  <form class="stack" action="${escapeHtml(secretPath)}" method="post" autocomplete="off">
+  <form class="stack" action="${escapeHtml(secretPath)}" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
     <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
-    <input class="textbox" name="pin" type="password" autocomplete="off" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="PIN" aria-label="PIN" required>
+    <input class="textbox" name="pin" type="password" autocomplete="new-password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="PIN" aria-label="PIN" required>
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="secret_pin" data-theme="light" data-callback="onSecretTurnstileSuccess" data-expired-callback="onSecretTurnstileExpired" data-error-callback="onSecretTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="${error ? 'error' : 'status'}">${escapeHtml(error || (turnstile.enabled ? 'Waiting for Turnstile.' : ''))}</div>
@@ -414,9 +492,9 @@ export function adminLoginPage(adminPath: string, error = ''): string {
   const turnstile = getTurnstileConfig();
   return basePage('TLSCheckin Admin', `
 <main class="center">
-  <form class="stack" action="${escapeHtml(adminPath)}/login" method="post" autocomplete="off">
-    <input class="textbox" name="username" type="text" autocomplete="off" aria-label="Username">
-    <input class="textbox" name="password" type="password" autocomplete="off" aria-label="Password">
+  <form class="stack" action="${escapeHtml(adminPath)}/login" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input class="textbox" name="username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Username">
+    <input class="textbox" name="password" type="password" autocomplete="new-password" aria-label="Password">
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="admin_login" data-theme="light" data-callback="onAdminTurnstileSuccess" data-expired-callback="onAdminTurnstileExpired" data-error-callback="onAdminTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="${error ? 'error' : 'status'}">${escapeHtml(error || (turnstile.enabled ? 'Waiting for Turnstile.' : ''))}</div>
@@ -464,7 +542,7 @@ export function passwordChangePage(adminPath: string, error = ''): string {
   return basePage('Change Password', `
 <main class="center">
   <form class="stack" action="${escapeHtml(adminPath)}/change-password" method="post" autocomplete="off">
-    <input class="textbox" name="newPassword" type="password" autocomplete="off" placeholder="New password" aria-label="New password">
+    <input class="textbox" name="newPassword" type="password" autocomplete="new-password" placeholder="New password" aria-label="New password">
     <button class="button" type="submit">Submit</button>
     <div class="error">${escapeHtml(error)}</div>
   </form>
@@ -476,6 +554,7 @@ export function adminPage(data: {
   users: UserRow[];
   followedByUser: Map<number, number[]>;
   audit: Array<{ id: number; event_type: string; details: string; ip: string | null; created_at: number }>;
+  smsSettings: SmsSettings;
 }): string {
   const userRows = data.users.map((user) => {
     const selected = new Set(data.followedByUser.get(user.id) ?? []);
@@ -512,9 +591,18 @@ export function adminPage(data: {
   <h1>TLSCheckin Admin</h1>
   <form action="${escapeHtml(data.adminPath)}/logout" method="post"><button class="button" type="submit">Log out</button></form>
 
+  <h2>IntelliSoftware SMS</h2>
+  <form action="${escapeHtml(data.adminPath)}/sms-settings" method="post" autocomplete="off">
+    <input name="accessKey" type="text" autocomplete="off" placeholder="Access key" value="${escapeHtml(data.smsSettings.accessKey)}">
+    <input name="secretKey" type="password" autocomplete="new-password" placeholder="${data.smsSettings.secretKey ? 'Secret key stored' : 'Secret key'}">
+    <input name="senderId" type="text" autocomplete="off" placeholder="Sender ID" value="${escapeHtml(data.smsSettings.senderId)}">
+    <button class="button" type="submit">Save SMS Settings</button>
+    <div class="muted">Secret key is stored in the encrypted database. Leave it blank to keep the existing value.</div>
+  </form>
+
   <h2>Create User</h2>
-  <form action="${escapeHtml(data.adminPath)}/users" method="post" autocomplete="off">
-    <input name="identity" type="text" autocomplete="off" placeholder="0612jr" pattern="[0-9]{4}[A-Za-z]{2}" required>
+  <form action="${escapeHtml(data.adminPath)}/users" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input name="identity" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0612jr" pattern="[0-9]{4}[A-Za-z]{2}" required>
     <button class="button" type="submit">Create</button>
   </form>
 
@@ -526,7 +614,7 @@ export function adminPage(data: {
 
   <h2>Change Admin Password</h2>
   <form action="${escapeHtml(data.adminPath)}/change-password" method="post" autocomplete="off">
-    <input name="newPassword" type="password" autocomplete="off" placeholder="New password" required>
+    <input name="newPassword" type="password" autocomplete="new-password" placeholder="New password" required>
     <button class="button" type="submit">Change</button>
   </form>
 

@@ -35,6 +35,8 @@ Required and configurable values:
 - `TURNSTILE_SECRET`: Cloudflare Turnstile widget secret.
 - `TURNSTILE_HOSTNAMES`: comma-separated hostnames allowed in siteverify responses, for example `localhost,127.0.0.1`.
 
+IntelliSoftware SMS credentials are not configured in `.env`. The administrator stores the AccessKey, SecretKey, and optional Sender ID from the admin page; these values are kept in the encrypted application database.
+
 Turnstile uses the existing-widget flow from Cloudflare's Turnstile Spin guidance:
 
 - Keep the existing widget and site key; do not create a replacement widget.
@@ -138,6 +140,14 @@ The landing page allows the user to set a 4-digit PIN and generate a 15-characte
 
 Opening a secret link displays a Turnstile-protected PIN page. A correct PIN starts a user session, records the check-in, and shows the same landing page while bypassing the username/secret login form.
 
+The landing page also lets each user amend their acknowledgement SMS preference on every login. A user can enter an international-format phone number such as `+447710123456` and opt in or out of acknowledgement texts. The saved number is normalized to the international digits-only format used by IntelliSoftware, for example `447710123456`, and local-format numbers such as `07710...` are rejected. The page previews the fixed acknowledgement message:
+
+```text
+Acknowledgement received, thank you for using TLS
+```
+
+When a follower sees a user's current check-in for the first time, the app sends this SMS once if the user has opted in. Repeat logins by the same follower do not send duplicate acknowledgement messages for the same check-in.
+
 The public check-in, admin login, secret-link PIN, and landing pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The landing page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
 
 ## Admin Page
@@ -170,6 +180,7 @@ When logged in, the administrator can:
 - Delete users.
 - Assign each user to follow multiple users.
 - Edit follow relationships.
+- Store IntelliSoftware SMS gateway credentials.
 - Change the admin password.
 - View the audit trail.
 
