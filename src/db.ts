@@ -29,6 +29,9 @@ export type UserSecretLinkRow = {
 export type FollowedUserStatusRow = UserRow & {
   viewer_seen_at: number | null;
   subject_seen_at: number | null;
+  location_latitude: number | null;
+  location_longitude: number | null;
+  location_shared_at: number | null;
 };
 
 export type AdminRow = {
@@ -102,6 +105,15 @@ export async function initDb(): Promise<void> {
       token_hash TEXT NOT NULL UNIQUE,
       pin_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_locations (
+      user_id INTEGER PRIMARY KEY,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      shared_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -203,7 +215,10 @@ export function getFollowedUserStatuses(followerId: number): FollowedUserStatusR
     SELECT
       u.*,
       viewer_status.subject_seen_at AS viewer_seen_at,
-      subject_status.subject_seen_at AS subject_seen_at
+      subject_status.subject_seen_at AS subject_seen_at,
+      user_locations.latitude AS location_latitude,
+      user_locations.longitude AS location_longitude,
+      user_locations.shared_at AS location_shared_at
     FROM follows f
     JOIN users u ON u.id = f.followed_id
     LEFT JOIN status_views viewer_status
@@ -212,6 +227,8 @@ export function getFollowedUserStatuses(followerId: number): FollowedUserStatusR
     LEFT JOIN status_views subject_status
       ON subject_status.viewer_id = u.id
       AND subject_status.subject_id = ?
+    LEFT JOIN user_locations
+      ON user_locations.user_id = u.id
     WHERE f.follower_id = ?
     ORDER BY LOWER(u.identity)
   `).all(followerId, followerId, followerId) as FollowedUserStatusRow[];
@@ -226,6 +243,16 @@ export function updateLastSeen(userId: number): number {
   const ts = nowMs();
   getDb().prepare('UPDATE users SET last_seen_at = ?, updated_at = ? WHERE id = ?').run(ts, ts, userId);
   return ts;
+}
+
+export function upsertUserLocation(userId: number, latitude: number, longitude: number): void {
+  const ts = nowMs();
+  getDb().prepare(`
+    INSERT INTO user_locations (user_id, latitude, longitude, shared_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(user_id)
+    DO UPDATE SET latitude = excluded.latitude, longitude = excluded.longitude, shared_at = excluded.shared_at, updated_at = excluded.updated_at
+  `).run(userId, latitude, longitude, ts, ts);
 }
 
 export function recordStatusViews(viewerId: number, subjects: UserRow[]): void {

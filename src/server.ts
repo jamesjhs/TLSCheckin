@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { config } from './config.js';
-import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, type UserRow } from './db.js';
+import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, type UserRow } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
@@ -295,6 +295,26 @@ app.post('/api/secret-link/rotate', (req, res) => {
   } else {
     renderUserLanding(req, res, user, url, user.last_seen_at, 'Secret link rotated.');
   }
+});
+
+app.post('/api/location', (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    res.status(401).json({ ok: false, message: 'Login required.' });
+    return;
+  }
+
+  const latitude = Number(((req.body ?? {}) as Record<string, unknown>).latitude);
+  const longitude = Number(((req.body ?? {}) as Record<string, unknown>).longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    res.status(400).json({ ok: false, message: 'Invalid location.' });
+    return;
+  }
+
+  upsertUserLocation(user.id, latitude, longitude);
+  recordAudit('user_location_shared', { user: user.identity }, clientIp(req));
+  res.json({ ok: true, message: 'Location shared.' });
 });
 
 app.post('/logout', (req, res) => {

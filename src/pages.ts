@@ -11,6 +11,25 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function googleMapsUrl(latitude: number, longitude: number): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude.toFixed(6)},${longitude.toFixed(6)}`)}`;
+}
+
+function renderLine(line: string): string {
+  const mapsUrlPattern = /https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=([A-Za-z0-9.%,-]+)/g;
+  let html = '';
+  let lastIndex = 0;
+  for (const match of line.matchAll(mapsUrlPattern)) {
+    const url = match[0];
+    const label = decodeURIComponent(match[1] ?? 'Map');
+    html += escapeHtml(line.slice(lastIndex, match.index));
+    html += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+    lastIndex = (match.index ?? 0) + url.length;
+  }
+  html += escapeHtml(line.slice(lastIndex));
+  return html;
+}
+
 function basePage(title: string, body: string, extraHead = ''): string {
   const turnstile = getTurnstileConfig();
   return `<!doctype html>
@@ -140,7 +159,7 @@ export function resultPage(lines: string[]): string {
   return basePage('TLSCheckin', `
 <main class="center">
   <div class="stack">
-    <div class="lines">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+    <div class="lines">${lines.map((line) => `<div>${renderLine(line)}</div>`).join('')}</div>
     <button class="button" type="button" onclick="leave()">Exit</button>
   </div>
 </main>
@@ -166,7 +185,7 @@ export function userLandingPage(data: {
   return basePage('TLSCheckin', `
 <main class="center">
   <div class="stack">
-    <div class="lines">${data.lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+    <div class="lines">${data.lines.map((line) => `<div>${renderLine(line)}</div>`).join('')}</div>
     <section class="link-tools" aria-label="Secret link settings">
       <div class="secret-link-row">
         <div class="secret-link-details">
@@ -280,29 +299,38 @@ shareLocationButton.addEventListener('click', () => {
     return;
   }
 
-  const mapsWindow = window.open('about:blank', '_blank');
-  if (mapsWindow) mapsWindow.opener = null;
   shareLocationButton.disabled = true;
   shareLocationButton.textContent = 'Getting Location';
 
-  window.setTimeout(() => {
+  requestAnimationFrame(() => {
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude.toFixed(6);
-        const lng = position.coords.longitude.toFixed(6);
-        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(lat + ',' + lng);
-        if (mapsWindow) {
-          mapsWindow.location.href = mapsUrl;
+      async (position) => {
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(latitude + ',' + longitude);
+
+        const response = await fetch('/api/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latitude, longitude })
+        }).catch(() => null);
+        if (!response || !response.ok) {
+          locationStatusBox.className = 'error';
+          locationStatusBox.textContent = 'Location could not be shared.';
         } else {
-          window.open(mapsUrl, '_blank', 'noopener');
+          locationStatusBox.className = 'status';
+          locationStatusBox.textContent = 'Shared location: ';
+          const mapLink = document.createElement('a');
+          mapLink.href = mapsUrl;
+          mapLink.target = '_blank';
+          mapLink.rel = 'noopener';
+          mapLink.textContent = latitude + ', ' + longitude;
+          locationStatusBox.appendChild(mapLink);
         }
-        locationStatusBox.className = 'status';
-        locationStatusBox.textContent = lat + ', ' + lng;
         shareLocationButton.disabled = false;
         shareLocationButton.textContent = 'Share Location';
       },
       (error) => {
-        if (mapsWindow) mapsWindow.close();
         locationStatusBox.className = 'error';
         locationStatusBox.textContent = error.code === error.PERMISSION_DENIED ? 'Location permission was denied.' : 'Unable to get location.';
         shareLocationButton.disabled = false;
@@ -310,7 +338,7 @@ shareLocationButton.addEventListener('click', () => {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
-  }, 0);
+  });
 });
 </script>`);
 }
@@ -374,9 +402,12 @@ export function formatFollowedLine(user: UserRow): string {
 
 export function formatFollowedStatusLine(user: FollowedUserStatusRow, viewerLastSeenAt: number | null): string {
   const base = formatFollowedLine(user);
-  if (!viewerLastSeenAt) return `${base} - Seen you: Not yet`;
+  const location = user.location_latitude !== null && user.location_longitude !== null
+    ? ` - Location: ${googleMapsUrl(user.location_latitude, user.location_longitude)}`
+    : '';
+  if (!viewerLastSeenAt) return `${base} - Seen you: Not yet${location}`;
   const hasSeenViewer = user.subject_seen_at !== null && user.subject_seen_at >= viewerLastSeenAt;
-  return `${base} - Seen you: ${hasSeenViewer ? 'Yes' : 'Not yet'}`;
+  return `${base} - Seen you: ${hasSeenViewer ? 'Yes' : 'Not yet'}${location}`;
 }
 
 export function adminLoginPage(adminPath: string, error = ''): string {
