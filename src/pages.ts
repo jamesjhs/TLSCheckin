@@ -607,6 +607,7 @@ export function adminPage(data: {
   const recipientOptions = usersWithPhones
     .map((user, index) => `<option value="${user.id}" data-phone="${escapeHtml(user.phone_number ?? '')}"${user.id === data.selectedCheckinUserId || (data.selectedCheckinUserId === undefined && index === 0) ? ' selected' : ''}>${escapeHtml(user.identity)} (${escapeHtml(user.phone_number ?? '')})</option>`)
     .join('');
+  const hasPresets = data.checkinPresets.length > 0;
   const presetOptions = data.checkinPresets
     .map((preset, index) => `<option value="${escapeHtml(preset)}"${preset === data.selectedPresetMessage || (data.selectedPresetMessage === undefined && index === 0) ? ' selected' : ''}>Preset ${index + 1}: ${escapeHtml(preset.slice(0, 72))}${preset.length > 72 ? '…' : ''}</option>`)
     .join('');
@@ -640,12 +641,14 @@ export function adminPage(data: {
   <form action="${escapeHtml(data.adminPath)}/send-checkin-sms" method="post" autocomplete="off" class="send-sms-form">
     <label for="checkin-user">User with saved phone number</label>
     <select id="checkin-user" name="userId">${recipientOptions}</select>
+    ${hasPresets ? `
     <label for="preset-selector">Preset</label>
     <select id="preset-selector" name="presetMessage">${presetOptions}</select>
+    ` : '<div class="muted">No preset is currently saved. Enter a message below.</div>'}
     <label for="checkin-message">Message</label>
     <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
     <button class="button" type="submit">Send SMS</button>
-    <div class="muted">The selected preset fills the message box and can be edited before sending.</div>
+    <div class="muted">${hasPresets ? 'The selected preset fills the message box and can be edited before sending.' : 'Messages are limited to 160 characters.'}</div>
   </form>
   ` : '<div class="muted">No users currently have a phone number saved for SMS sending.</div>'}
 

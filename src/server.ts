@@ -754,8 +754,8 @@ app.use((_req, res) => {
 });
 
 initDb()
+  .then(() => ensureCheckinsFile())
   .then(() => {
-    ensureCheckinsFile();
     app.listen(config.port, () => {
       console.log(`TLSCheckin listening on http://localhost:${config.port}`);
       console.log(`Admin path for local server date: ${currentAdminPath()}`);
