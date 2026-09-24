@@ -638,7 +638,7 @@ export function adminPage(data: {
     <label for="checkin-user">User with saved phone number</label>
     <select id="checkin-user" name="userId">${recipientOptions}</select>
     <label for="preset-selector">Preset</label>
-    <select id="preset-selector">${presetOptions}</select>
+    <select id="preset-selector" name="presetMessage">${presetOptions}</select>
     <label for="checkin-message">Message</label>
     <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
     <button class="button" type="submit">Send SMS</button>
@@ -671,7 +671,9 @@ export function adminPage(data: {
   </table>
 </main>
 <script>
+/** @type {HTMLSelectElement | null} */
 const presetSelector = document.getElementById('preset-selector');
+/** @type {HTMLTextAreaElement | null} */
 const checkinMessage = document.getElementById('checkin-message');
 if (presetSelector && checkinMessage) {
   presetSelector.addEventListener('change', () => {
