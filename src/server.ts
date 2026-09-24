@@ -633,7 +633,7 @@ adminRouter.post('/send-checkin-sms', requireAdmin, async (req, res) => {
       renderAdmin(req, res, { smsSendStatus: result.error, smsSendStatusIsError: true });
       return;
     }
-    recordAudit('checkin_sms_sent', { user: user.identity, phone_number: user.phone_number, message: normalized.message }, clientIp(req));
+    recordAudit('checkin_sms_sent', { user: user.identity, message_length: normalized.message.length }, clientIp(req));
     renderAdmin(req, res, { smsSendStatus: `SMS sent to ${user.identity}.` });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown SMS send failure.';
