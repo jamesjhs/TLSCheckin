@@ -4,12 +4,13 @@ import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { ensureCheckinsFile, normalizeCheckinMessage, readCheckinPresets, saveCheckinPresets } from './checkins.js';
 import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, updateUserSmsPreferences, claimAcknowledgementSms, markAcknowledgementSmsSent, markAcknowledgementSmsFailed, getSmsSettings, updateSmsSettings, type AcknowledgementSmsCandidate, type UserRow } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
 import { adminLoginPage, adminPage, formatFollowedStatusLine, passwordChangePage, publicHomePage, secretPinPage, userLandingPage } from './pages.js';
-import { ACKNOWLEDGEMENT_SMS_TEXT, normalizeInternationalPhoneNumber, sendAcknowledgementSms } from './sms.js';
+import { ACKNOWLEDGEMENT_SMS_TEXT, normalizeInternationalPhoneNumber, sendAcknowledgementSms, sendSms } from './sms.js';
 
 const app = express();
 
@@ -80,6 +81,12 @@ function parseCheckinCode(raw: unknown): { datePart: string; identity: string } 
 function selectedIds(value: unknown): number[] {
   if (Array.isArray(value)) return value.map(Number).filter(Number.isInteger);
   if (typeof value === 'string' && value) return [Number(value)].filter(Number.isInteger);
+  return [];
+}
+
+function stringValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? ''));
+  if (typeof value === 'string') return [value];
   return [];
 }
 
@@ -170,6 +177,13 @@ function getDisplaySecretUrl(req: Request, user: UserRow, generatedSecretUrl?: s
 function wantsJson(req: Request): boolean {
   return req.is('application/json') === 'application/json' || req.accepts(['html', 'json']) === 'json';
 }
+
+type AdminRenderOptions = {
+  checkinPresetStatus?: string;
+  checkinPresetStatusIsError?: boolean;
+  smsSendStatus?: string;
+  smsSendStatusIsError?: boolean;
+};
 
 async function renderUserLanding(
   req: Request,
@@ -587,6 +601,47 @@ adminRouter.post('/sms-settings', requireAdmin, (req, res) => {
   res.redirect(currentAdminPath(req));
 });
 
+adminRouter.post('/checkin-presets', requireAdmin, (req, res) => {
+  try {
+    const presets = saveCheckinPresets(stringValues(req.body.presetMessages));
+    recordAudit('checkin_sms_presets_updated', { preset_count: presets.length }, clientIp(req));
+    renderAdmin(req, res, { checkinPresetStatus: `Saved ${presets.length} check-in preset${presets.length === 1 ? '' : 's'}.` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to save check-in presets.';
+    renderAdmin(req, res, { checkinPresetStatus: message, checkinPresetStatusIsError: true });
+  }
+});
+
+adminRouter.post('/send-checkin-sms', requireAdmin, async (req, res) => {
+  const userId = Number(req.body.userId);
+  const user = Number.isInteger(userId) ? findUserById(userId) : undefined;
+  if (!user || !user.phone_number) {
+    renderAdmin(req, res, { smsSendStatus: 'Select a user with a saved phone number.', smsSendStatusIsError: true });
+    return;
+  }
+
+  const normalized = normalizeCheckinMessage(req.body.message);
+  if (!normalized.ok) {
+    renderAdmin(req, res, { smsSendStatus: normalized.message, smsSendStatusIsError: true });
+    return;
+  }
+
+  try {
+    const result = await sendSms(getSmsSettings(), user.phone_number, normalized.message);
+    if (!result.ok) {
+      recordAudit('checkin_sms_failed', { user: user.identity, reason: result.error }, clientIp(req));
+      renderAdmin(req, res, { smsSendStatus: result.error, smsSendStatusIsError: true });
+      return;
+    }
+    recordAudit('checkin_sms_sent', { user: user.identity, phone_number: user.phone_number, message: normalized.message }, clientIp(req));
+    renderAdmin(req, res, { smsSendStatus: `SMS sent to ${user.identity}.` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown SMS send failure.';
+    recordAudit('checkin_sms_failed', { user: user.identity, reason: message }, clientIp(req));
+    renderAdmin(req, res, { smsSendStatus: message, smsSendStatusIsError: true });
+  }
+});
+
 adminRouter.post('/logout', requireAdmin, (req, res) => {
   req.session.destroy(() => {
     res.redirect(currentAdminPath(req));
@@ -631,7 +686,7 @@ adminRouter.post('/users/:id/follows', requireAdmin, (req, res) => {
   res.redirect(currentAdminPath(req));
 });
 
-function renderAdmin(req: Request, res: Response): void {
+function renderAdmin(req: Request, res: Response, options: AdminRenderOptions = {}): void {
   const users = listUsers();
   const followedByUser = new Map<number, number[]>();
   for (const user of users) followedByUser.set(user.id, getFollowedIds(user.id));
@@ -640,7 +695,9 @@ function renderAdmin(req: Request, res: Response): void {
     users,
     followedByUser,
     audit: listAudit(200),
-    smsSettings: getSmsSettings()
+    smsSettings: getSmsSettings(),
+    checkinPresets: readCheckinPresets(),
+    ...options
   }));
 }
 
@@ -652,6 +709,7 @@ app.use((_req, res) => {
 
 initDb()
   .then(() => {
+    ensureCheckinsFile();
     app.listen(config.port, () => {
       console.log(`TLSCheckin listening on http://localhost:${config.port}`);
       console.log(`Admin path for local server date: ${currentAdminPath()}`);

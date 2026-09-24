@@ -44,7 +44,7 @@ function basePage(title: string, body: string, extraHead = ''): string {
   <style>
     html, body { margin: 0; min-height: 100%; font-family: Arial, sans-serif; background: #fff; color: #111; }
     body { min-height: 100vh; }
-    input, button, select { font: inherit; }
+    input, button, select, textarea { font: inherit; }
     .center { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; box-sizing: border-box; }
     .stack { display: flex; flex-direction: column; gap: 12px; align-items: center; }
     .home-logo { width: min(360px, 82vw); aspect-ratio: 2 / 1; object-fit: contain; display: block; margin-bottom: 6px; }
@@ -88,7 +88,13 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .admin table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
     .admin th, .admin td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
     .admin form { margin: 12px 0 24px; }
-    .admin input, .admin select { padding: 7px 8px; margin: 3px 4px 3px 0; }
+    .admin input, .admin select, .admin textarea { padding: 7px 8px; margin: 3px 4px 3px 0; }
+    .admin textarea { width: min(100%, 720px); box-sizing: border-box; }
+    .admin .status-panel { margin: 6px 0 10px; }
+    .admin .preset-list { display: grid; gap: 10px; margin-bottom: 10px; }
+    .admin .preset-item { display: grid; gap: 6px; }
+    .admin .send-sms-form { display: grid; gap: 10px; max-width: 720px; }
+    .admin .send-sms-form label, .admin .preset-item label { font-size: 13px; color: #444; }
     .error { color: #a40000; min-height: 1.2em; }
     .status { color: #666; min-height: 1.2em; font-size: 13px; }
   </style>
@@ -555,7 +561,13 @@ export function adminPage(data: {
   followedByUser: Map<number, number[]>;
   audit: Array<{ id: number; event_type: string; details: string; ip: string | null; created_at: number }>;
   smsSettings: SmsSettings;
+  checkinPresets: string[];
+  checkinPresetStatus?: string;
+  checkinPresetStatusIsError?: boolean;
+  smsSendStatus?: string;
+  smsSendStatusIsError?: boolean;
 }): string {
+  const usersWithPhones = data.users.filter((user) => Boolean(user.phone_number));
   const userRows = data.users.map((user) => {
     const selected = new Set(data.followedByUser.get(user.id) ?? []);
     const options = data.users
@@ -585,6 +597,17 @@ export function adminPage(data: {
     <td>${escapeHtml(event.details)}</td>
     <td>${escapeHtml(event.ip ?? '')}</td>
   </tr>`).join('');
+  const presetRows = [...data.checkinPresets, '', '', ''].map((preset, index) => `<div class="preset-item">
+    <label for="preset-${index + 1}">Preset ${index + 1}</label>
+    <textarea id="preset-${index + 1}" name="presetMessages" rows="3" maxlength="160">${escapeHtml(preset)}</textarea>
+  </div>`).join('');
+  const recipientOptions = usersWithPhones
+    .map((user, index) => `<option value="${user.id}" data-phone="${escapeHtml(user.phone_number ?? '')}"${index === 0 ? ' selected' : ''}>${escapeHtml(user.identity)} (${escapeHtml(user.phone_number ?? '')})</option>`)
+    .join('');
+  const presetOptions = data.checkinPresets
+    .map((preset, index) => `<option value="${escapeHtml(preset)}"${index === 0 ? ' selected' : ''}>Preset ${index + 1}: ${escapeHtml(preset.slice(0, 72))}${preset.length > 72 ? '…' : ''}</option>`)
+    .join('');
+  const defaultSelectedMessage = data.checkinPresets[0] ?? '';
 
   return basePage('TLSCheckin Admin', `
 <main class="admin">
@@ -599,6 +622,29 @@ export function adminPage(data: {
     <button class="button" type="submit">Save SMS Settings</button>
     <div class="muted">Secret key is stored in the encrypted database. Leave it blank to keep the existing value.</div>
   </form>
+
+  <h2>Check-in SMS Presets</h2>
+  <div class="${data.checkinPresetStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.checkinPresetStatus ?? '')}</div>
+  <form action="${escapeHtml(data.adminPath)}/checkin-presets" method="post" autocomplete="off">
+    <div class="preset-list">${presetRows}</div>
+    <button class="button" type="submit">Save Presets</button>
+    <div class="muted">Preset messages are stored in ${escapeHtml('checkins.json')} on the server. Blank rows are ignored and messages are limited to 160 characters.</div>
+  </form>
+
+  <h2>Send Check-in SMS</h2>
+  <div class="${data.smsSendStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.smsSendStatus ?? '')}</div>
+  ${usersWithPhones.length ? `
+  <form action="${escapeHtml(data.adminPath)}/send-checkin-sms" method="post" autocomplete="off" class="send-sms-form">
+    <label for="checkin-user">User with saved phone number</label>
+    <select id="checkin-user" name="userId">${recipientOptions}</select>
+    <label for="preset-selector">Preset</label>
+    <select id="preset-selector">${presetOptions}</select>
+    <label for="checkin-message">Message</label>
+    <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
+    <button class="button" type="submit">Send SMS</button>
+    <div class="muted">The selected preset fills the message box and can be edited before sending.</div>
+  </form>
+  ` : '<div class="muted">No users currently have a phone number saved for SMS sending.</div>'}
 
   <h2>Create User</h2>
   <form action="${escapeHtml(data.adminPath)}/users" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -623,5 +669,14 @@ export function adminPage(data: {
     <thead><tr><th>Time</th><th>Event</th><th>Details</th><th>IP</th></tr></thead>
     <tbody>${auditRows || '<tr><td colspan="4">No audit events.</td></tr>'}</tbody>
   </table>
-</main>`);
+</main>
+<script>
+const presetSelector = document.getElementById('preset-selector');
+const checkinMessage = document.getElementById('checkin-message');
+if (presetSelector && checkinMessage) {
+  presetSelector.addEventListener('change', () => {
+    checkinMessage.value = presetSelector.value;
+  });
+}
+</script>`);
 }
