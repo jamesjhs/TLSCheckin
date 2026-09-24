@@ -19,6 +19,13 @@ export function smsSettingsAreComplete(settings: SmsSettings): boolean {
   return Boolean(settings.accessKey && settings.secretKey);
 }
 
+export function normalizeSmsText(raw: unknown, maxLength = 160): { ok: true; text: string } | { ok: false; message: string } {
+  const text = String(raw ?? '').trim();
+  if (!text) return { ok: false, message: 'Enter an SMS message.' };
+  if (text.length > maxLength) return { ok: false, message: `SMS messages must be ${maxLength} characters or fewer.` };
+  return { ok: true, text };
+}
+
 type IntelliSoftwareResponse = {
   response_status?: string;
   messages?: Array<{
@@ -43,7 +50,7 @@ function describeError(response: IntelliSoftwareResponse): string {
   return [error.error, error.error_code, error.error_description].filter((value) => value !== undefined && value !== '').join(' ');
 }
 
-export async function sendAcknowledgementSms(settings: SmsSettings, to: string): Promise<{ ok: true; providerMessageId?: string } | { ok: false; error: string }> {
+export async function sendSms(settings: SmsSettings, to: string, text: string): Promise<{ ok: true; providerMessageId?: string } | { ok: false; error: string }> {
   if (!smsSettingsAreComplete(settings)) return { ok: false, error: 'IntelliSoftware settings are incomplete.' };
 
   const response = await fetch('https://www.intellisoftware.co.uk/api/json/sendmsg.aspx', {
@@ -63,7 +70,7 @@ export async function sendAcknowledgementSms(settings: SmsSettings, to: string):
         channel: 'sms',
         content: {
           msgtype: 'text',
-          text: ACKNOWLEDGEMENT_SMS_TEXT,
+          text,
           maxconcat: 1
         }
       }
@@ -81,4 +88,8 @@ export async function sendAcknowledgementSms(settings: SmsSettings, to: string):
   const message = body.messages?.[0];
   if (message?.error) return { ok: false, error: describeError(body) };
   return { ok: true, providerMessageId: message?.id };
+}
+
+export async function sendAcknowledgementSms(settings: SmsSettings, to: string): Promise<{ ok: true; providerMessageId?: string } | { ok: false; error: string }> {
+  return sendSms(settings, to, ACKNOWLEDGEMENT_SMS_TEXT);
 }

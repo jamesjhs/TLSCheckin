@@ -181,6 +181,8 @@ When logged in, the administrator can:
 - Assign each user to follow multiple users.
 - Edit follow relationships.
 - Store IntelliSoftware SMS gateway credentials.
+- Edit the server-side `checkins.json` preset SMS messages.
+- Send an editable preset SMS to any user with a saved phone number.
 - Change the admin password.
 - View the audit trail.
 
