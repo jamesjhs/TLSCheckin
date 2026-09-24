@@ -688,6 +688,18 @@ adminRouter.post('/send-checkin-sms', requireAdmin, async (req, res) => {
   }
 });
 
+adminRouter.post('/load-checkin-preset', requireAdmin, (req, res) => {
+  const userId = Number(req.body.userId);
+  const selectedPresetMessage = String(req.body.presetMessage ?? '').trim();
+  renderAdmin(req, res, {
+    selectedCheckinUserId: Number.isInteger(userId) ? userId : undefined,
+    selectedPresetMessage,
+    draftCheckinMessage: selectedPresetMessage,
+    smsSendStatus: selectedPresetMessage ? 'Preset loaded into the message box.' : 'Select a preset to load.',
+    smsSendStatusIsError: !selectedPresetMessage
+  });
+});
+
 adminRouter.post('/logout', requireAdmin, (req, res) => {
   req.session.destroy(() => {
     res.redirect(currentAdminPath(req));
@@ -754,7 +766,9 @@ app.use((_req, res) => {
 });
 
 initDb()
-  .then(() => ensureCheckinsFile())
+  .then(() => {
+    ensureCheckinsFile();
+  })
   .then(() => {
     app.listen(config.port, () => {
       console.log(`TLSCheckin listening on http://localhost:${config.port}`);

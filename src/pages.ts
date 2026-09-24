@@ -647,8 +647,11 @@ export function adminPage(data: {
     ` : '<div class="muted">No preset is currently saved. Enter a message below.</div>'}
     <label for="checkin-message">Message</label>
     <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
-    <button class="button" type="submit">Send SMS</button>
-    <div class="muted">${hasPresets ? 'The selected preset fills the message box and can be edited before sending.' : 'Messages are limited to 160 characters.'}</div>
+    <div>
+      ${hasPresets ? `<button class="button" type="submit" formaction="${escapeHtml(data.adminPath)}/load-checkin-preset">Load Preset</button>` : ''}
+      <button class="button" type="submit">Send SMS</button>
+    </div>
+    <div class="muted">${hasPresets ? 'Choose Load Preset to copy the selected preset into the message box, then edit it or send it as-is.' : 'Messages are limited to 160 characters.'}</div>
   </form>
   ` : '<div class="muted">No users currently have a phone number saved for SMS sending.</div>'}
 
