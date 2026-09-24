@@ -183,6 +183,9 @@ type AdminRenderOptions = {
   checkinPresetStatusIsError?: boolean;
   smsSendStatus?: string;
   smsSendStatusIsError?: boolean;
+  selectedCheckinUserId?: number;
+  selectedPresetMessage?: string;
+  draftCheckinMessage?: string;
 };
 
 async function renderUserLanding(
@@ -614,31 +617,74 @@ adminRouter.post('/checkin-presets', requireAdmin, (req, res) => {
 
 adminRouter.post('/send-checkin-sms', requireAdmin, async (req, res) => {
   const userId = Number(req.body.userId);
+  const selectedPresetMessage = String(req.body.presetMessage ?? '').trim();
+  const rawMessage = String(req.body.message ?? '').trim() || selectedPresetMessage;
   const user = Number.isInteger(userId) ? findUserById(userId) : undefined;
   if (!user || !user.phone_number) {
-    renderAdmin(req, res, { smsSendStatus: 'Select a user with a saved phone number.', smsSendStatusIsError: true });
+    renderAdmin(req, res, {
+      smsSendStatus: 'Select a user with a saved phone number.',
+      smsSendStatusIsError: true,
+      selectedCheckinUserId: Number.isInteger(userId) ? userId : undefined,
+      selectedPresetMessage,
+      draftCheckinMessage: rawMessage
+    });
     return;
   }
 
-  const normalized = normalizeCheckinMessage(req.body.message);
+  const normalizedPhone = normalizeInternationalPhoneNumber(user.phone_number);
+  if (!normalizedPhone.ok || !normalizedPhone.phoneNumber) {
+    renderAdmin(req, res, {
+      smsSendStatus: 'The saved phone number for this user is invalid.',
+      smsSendStatusIsError: true,
+      selectedCheckinUserId: user.id,
+      selectedPresetMessage,
+      draftCheckinMessage: rawMessage
+    });
+    return;
+  }
+
+  const normalized = normalizeCheckinMessage(rawMessage);
   if (!normalized.ok) {
-    renderAdmin(req, res, { smsSendStatus: normalized.message, smsSendStatusIsError: true });
+    renderAdmin(req, res, {
+      smsSendStatus: normalized.message,
+      smsSendStatusIsError: true,
+      selectedCheckinUserId: user.id,
+      selectedPresetMessage,
+      draftCheckinMessage: rawMessage
+    });
     return;
   }
 
   try {
-    const result = await sendSms(getSmsSettings(), user.phone_number, normalized.message);
+    const result = await sendSms(getSmsSettings(), normalizedPhone.phoneNumber, normalized.message);
     if (!result.ok) {
       recordAudit('checkin_sms_failed', { user: user.identity, reason: result.error }, clientIp(req));
-      renderAdmin(req, res, { smsSendStatus: result.error, smsSendStatusIsError: true });
+      renderAdmin(req, res, {
+        smsSendStatus: result.error,
+        smsSendStatusIsError: true,
+        selectedCheckinUserId: user.id,
+        selectedPresetMessage,
+        draftCheckinMessage: normalized.message
+      });
       return;
     }
     recordAudit('checkin_sms_sent', { user: user.identity, message_length: normalized.message.length }, clientIp(req));
-    renderAdmin(req, res, { smsSendStatus: `SMS sent to ${user.identity}.` });
+    renderAdmin(req, res, {
+      smsSendStatus: `SMS sent to ${user.identity}.`,
+      selectedCheckinUserId: user.id,
+      selectedPresetMessage,
+      draftCheckinMessage: normalized.message
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown SMS send failure.';
     recordAudit('checkin_sms_failed', { user: user.identity, reason: message }, clientIp(req));
-    renderAdmin(req, res, { smsSendStatus: message, smsSendStatusIsError: true });
+    renderAdmin(req, res, {
+      smsSendStatus: message,
+      smsSendStatusIsError: true,
+      selectedCheckinUserId: user.id,
+      selectedPresetMessage,
+      draftCheckinMessage: normalized.message
+    });
   }
 });
 

@@ -566,6 +566,9 @@ export function adminPage(data: {
   checkinPresetStatusIsError?: boolean;
   smsSendStatus?: string;
   smsSendStatusIsError?: boolean;
+  selectedCheckinUserId?: number;
+  selectedPresetMessage?: string;
+  draftCheckinMessage?: string;
 }): string {
   const usersWithPhones = data.users.filter((user) => Boolean(user.phone_number));
   const userRows = data.users.map((user) => {
@@ -602,12 +605,12 @@ export function adminPage(data: {
     <textarea id="preset-${index + 1}" name="presetMessages" rows="3" maxlength="160">${escapeHtml(preset)}</textarea>
   </div>`).join('');
   const recipientOptions = usersWithPhones
-    .map((user, index) => `<option value="${user.id}" data-phone="${escapeHtml(user.phone_number ?? '')}"${index === 0 ? ' selected' : ''}>${escapeHtml(user.identity)} (${escapeHtml(user.phone_number ?? '')})</option>`)
+    .map((user, index) => `<option value="${user.id}" data-phone="${escapeHtml(user.phone_number ?? '')}"${user.id === data.selectedCheckinUserId || (data.selectedCheckinUserId === undefined && index === 0) ? ' selected' : ''}>${escapeHtml(user.identity)} (${escapeHtml(user.phone_number ?? '')})</option>`)
     .join('');
   const presetOptions = data.checkinPresets
-    .map((preset, index) => `<option value="${escapeHtml(preset)}"${index === 0 ? ' selected' : ''}>Preset ${index + 1}: ${escapeHtml(preset.slice(0, 72))}${preset.length > 72 ? '…' : ''}</option>`)
+    .map((preset, index) => `<option value="${escapeHtml(preset)}"${preset === data.selectedPresetMessage || (data.selectedPresetMessage === undefined && index === 0) ? ' selected' : ''}>Preset ${index + 1}: ${escapeHtml(preset.slice(0, 72))}${preset.length > 72 ? '…' : ''}</option>`)
     .join('');
-  const defaultSelectedMessage = data.checkinPresets[0] ?? '';
+  const defaultSelectedMessage = data.draftCheckinMessage ?? data.selectedPresetMessage ?? data.checkinPresets[0] ?? '';
 
   return basePage('TLSCheckin Admin', `
 <main class="admin">
