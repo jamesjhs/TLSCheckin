@@ -678,16 +678,5 @@ export function adminPage(data: {
     <thead><tr><th>Time</th><th>Event</th><th>Details</th><th>IP</th></tr></thead>
     <tbody>${auditRows || '<tr><td colspan="4">No audit events.</td></tr>'}</tbody>
   </table>
-</main>
-<script>
-/** @type {HTMLSelectElement | null} */
-const presetSelector = document.getElementById('preset-selector');
-/** @type {HTMLTextAreaElement | null} */
-const checkinMessage = document.getElementById('checkin-message');
-if (presetSelector && checkinMessage) {
-  presetSelector.addEventListener('change', () => {
-    checkinMessage.value = presetSelector.value;
-  });
-}
-</script>`);
+</main>`);
 }
