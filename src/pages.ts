@@ -701,5 +701,14 @@ export function adminPage(data: {
       <tbody>${auditRows || '<tr><td colspan="4">No audit events.</td></tr>'}</tbody>
     </table>
   </details>
-</main>`);
+</main>
+<script>
+const presetSelector = document.getElementById('preset-selector');
+const checkinMessage = document.getElementById('checkin-message');
+if (presetSelector && checkinMessage) {
+  presetSelector.addEventListener('change', () => {
+    checkinMessage.value = presetSelector.value;
+  });
+}
+</script>`);
 }
