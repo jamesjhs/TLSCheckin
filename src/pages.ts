@@ -91,10 +91,17 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .admin input, .admin select, .admin textarea { padding: 7px 8px; margin: 3px 4px 3px 0; }
     .admin textarea { width: min(100%, 720px); box-sizing: border-box; }
     .admin .status-panel { margin: 6px 0 10px; }
+    .admin .admin-section { margin: 18px 0 10px; }
+    .admin .admin-section summary { cursor: pointer; font-size: 20px; font-weight: 700; }
+    .admin .admin-section summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
+    .admin .admin-section form { margin-bottom: 24px; }
     .admin .preset-list { display: grid; gap: 10px; margin-bottom: 10px; }
     .admin .preset-item { display: grid; gap: 6px; }
     .admin .send-sms-form { display: grid; gap: 10px; max-width: 720px; }
     .admin .send-sms-form label, .admin .preset-item label { font-size: 13px; color: #444; }
+    .admin .users-table form { margin: 0; }
+    .admin .follows-select { width: min(360px, 100%); min-width: 220px; box-sizing: border-box; }
+    .admin .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
     .error { color: #a40000; min-height: 1.2em; }
     .status { color: #666; min-height: 1.2em; font-size: 13px; }
   </style>
@@ -581,15 +588,17 @@ export function adminPage(data: {
       <td>${escapeHtml(user.identity)}</td>
       <td>${user.last_seen_at ? escapeHtml(formatLocalShort(user.last_seen_at)) : 'Never logged in'}</td>
       <td>
-        <form action="${escapeHtml(data.adminPath)}/users/${user.id}/follows" method="post">
-          <select name="followedIds" multiple size="4">${options}</select>
-          <button class="button" type="submit">Save</button>
+        <form id="follows-${user.id}" action="${escapeHtml(data.adminPath)}/users/${user.id}/follows" method="post">
+          <select class="follows-select" name="followedIds" multiple size="4">${options}</select>
         </form>
       </td>
       <td>
-        <form action="${escapeHtml(data.adminPath)}/users/${user.id}/delete" method="post">
-          <button class="button" type="submit">Delete</button>
-        </form>
+        <div class="action-buttons">
+          <button class="button" type="submit" form="follows-${user.id}">Save</button>
+          <form action="${escapeHtml(data.adminPath)}/users/${user.id}/delete" method="post">
+            <button class="button" type="submit">Delete</button>
+          </form>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -618,65 +627,79 @@ export function adminPage(data: {
   <h1>TLSCheckin Admin</h1>
   <form action="${escapeHtml(data.adminPath)}/logout" method="post"><button class="button" type="submit">Log out</button></form>
 
-  <h2>IntelliSoftware SMS</h2>
-  <form action="${escapeHtml(data.adminPath)}/sms-settings" method="post" autocomplete="off">
-    <input name="accessKey" type="text" autocomplete="off" placeholder="Access key" value="${escapeHtml(data.smsSettings.accessKey)}">
-    <input name="secretKey" type="password" autocomplete="new-password" placeholder="${data.smsSettings.secretKey ? 'Secret key stored' : 'Secret key'}">
-    <input name="senderId" type="text" autocomplete="off" placeholder="Sender ID" value="${escapeHtml(data.smsSettings.senderId)}">
-    <button class="button" type="submit">Save SMS Settings</button>
-    <div class="muted">Secret key is stored in the encrypted database. Leave it blank to keep the existing value.</div>
-  </form>
+  <details class="admin-section">
+    <summary>IntelliSoftware SMS</summary>
+    <form action="${escapeHtml(data.adminPath)}/sms-settings" method="post" autocomplete="off">
+      <input name="accessKey" type="text" autocomplete="off" placeholder="Access key" value="${escapeHtml(data.smsSettings.accessKey)}">
+      <input name="secretKey" type="password" autocomplete="new-password" placeholder="${data.smsSettings.secretKey ? 'Secret key stored' : 'Secret key'}">
+      <input name="senderId" type="text" autocomplete="off" placeholder="Sender ID" value="${escapeHtml(data.smsSettings.senderId)}">
+      <button class="button" type="submit">Save SMS Settings</button>
+      <div class="muted">Secret key is stored in the encrypted database. Leave it blank to keep the existing value.</div>
+    </form>
+  </details>
 
-  <h2>Check-in SMS Presets</h2>
-  <div class="${data.checkinPresetStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.checkinPresetStatus ?? '')}</div>
-  <form action="${escapeHtml(data.adminPath)}/checkin-presets" method="post" autocomplete="off">
-    <div class="preset-list">${presetRows}</div>
-    <button class="button" type="submit">Save Presets</button>
-    <div class="muted">Preset messages are stored in ${escapeHtml('checkins.json')} on the server. Blank rows are ignored and messages are limited to 160 characters.</div>
-  </form>
+  <details class="admin-section">
+    <summary>Check-in SMS Presets</summary>
+    <div class="${data.checkinPresetStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.checkinPresetStatus ?? '')}</div>
+    <form action="${escapeHtml(data.adminPath)}/checkin-presets" method="post" autocomplete="off">
+      <div class="preset-list">${presetRows}</div>
+      <button class="button" type="submit">Save Presets</button>
+      <div class="muted">Preset messages are stored in ${escapeHtml('checkins.json')} on the server. Blank rows are ignored and messages are limited to 160 characters.</div>
+    </form>
+  </details>
 
-  <h2>Send Check-in SMS</h2>
-  <div class="${data.smsSendStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.smsSendStatus ?? '')}</div>
-  ${usersWithPhones.length ? `
-  <form action="${escapeHtml(data.adminPath)}/send-checkin-sms" method="post" autocomplete="off" class="send-sms-form">
-    <label for="checkin-user">User with saved phone number</label>
-    <select id="checkin-user" name="userId">${recipientOptions}</select>
-    ${hasPresets ? `
-    <label for="preset-selector">Preset</label>
-    <select id="preset-selector" name="presetMessage">${presetOptions}</select>
-    ` : '<div class="muted">No preset is currently saved. Enter a message below.</div>'}
-    <label for="checkin-message">Message</label>
-    <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
-    <div>
-      ${hasPresets ? `<button class="button" type="submit" formaction="${escapeHtml(data.adminPath)}/load-checkin-preset">Load Preset</button>` : ''}
-      <button class="button" type="submit">Send SMS</button>
-    </div>
-    <div class="muted">${hasPresets ? 'Choose Load Preset to copy the selected preset into the message box, then edit it or send it as-is.' : 'Messages are limited to 160 characters.'}</div>
-  </form>
-  ` : '<div class="muted">No users currently have a phone number saved for SMS sending.</div>'}
+  <details class="admin-section">
+    <summary>Send Check-in SMS</summary>
+    <div class="${data.smsSendStatusIsError ? 'error' : 'status'} status-panel">${escapeHtml(data.smsSendStatus ?? '')}</div>
+    ${usersWithPhones.length ? `
+    <form action="${escapeHtml(data.adminPath)}/send-checkin-sms" method="post" autocomplete="off" class="send-sms-form">
+      <label for="checkin-user">User with saved phone number</label>
+      <select id="checkin-user" name="userId">${recipientOptions}</select>
+      ${hasPresets ? `
+      <label for="preset-selector">Preset</label>
+      <select id="preset-selector" name="presetMessage">${presetOptions}</select>
+      ` : '<div class="muted">No preset is currently saved. Enter a message below.</div>'}
+      <label for="checkin-message">Message</label>
+      <textarea id="checkin-message" name="message" rows="4" maxlength="160">${escapeHtml(defaultSelectedMessage)}</textarea>
+      <div>
+        ${hasPresets ? `<button class="button" type="submit" formaction="${escapeHtml(data.adminPath)}/load-checkin-preset">Load Preset</button>` : ''}
+        <button class="button" type="submit">Send SMS</button>
+      </div>
+      <div class="muted">${hasPresets ? 'Choose Load Preset to copy the selected preset into the message box, then edit it or send it as-is.' : 'Messages are limited to 160 characters.'}</div>
+    </form>
+    ` : '<div class="muted">No users currently have a phone number saved for SMS sending.</div>'}
+  </details>
 
-  <h2>Create User</h2>
-  <form action="${escapeHtml(data.adminPath)}/users" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <input name="identity" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0612jr" pattern="[0-9]{4}[A-Za-z]{2}" required>
-    <button class="button" type="submit">Create</button>
-  </form>
+  <details class="admin-section">
+    <summary>Create User</summary>
+    <form action="${escapeHtml(data.adminPath)}/users" method="post" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <input name="identity" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0612jr" pattern="[0-9]{4}[A-Za-z]{2}" required>
+      <button class="button" type="submit">Create</button>
+    </form>
+  </details>
 
-  <h2>Users</h2>
-  <table>
-    <thead><tr><th>Identity</th><th>Last seen</th><th>Follows</th><th>Delete</th></tr></thead>
-    <tbody>${userRows || '<tr><td colspan="4">No users created.</td></tr>'}</tbody>
-  </table>
+  <details class="admin-section">
+    <summary>Users</summary>
+    <table class="users-table">
+      <thead><tr><th>Identity</th><th>Last seen</th><th>Follows</th><th>Actions</th></tr></thead>
+      <tbody>${userRows || '<tr><td colspan="4">No users created.</td></tr>'}</tbody>
+    </table>
+  </details>
 
-  <h2>Change Admin Password</h2>
-  <form action="${escapeHtml(data.adminPath)}/change-password" method="post" autocomplete="off">
-    <input name="newPassword" type="password" autocomplete="new-password" placeholder="New password" required>
-    <button class="button" type="submit">Change</button>
-  </form>
+  <details class="admin-section">
+    <summary>Change Admin Password</summary>
+    <form action="${escapeHtml(data.adminPath)}/change-password" method="post" autocomplete="off">
+      <input name="newPassword" type="password" autocomplete="new-password" placeholder="New password" required>
+      <button class="button" type="submit">Change</button>
+    </form>
+  </details>
 
-  <h2>Audit Trail</h2>
-  <table>
-    <thead><tr><th>Time</th><th>Event</th><th>Details</th><th>IP</th></tr></thead>
-    <tbody>${auditRows || '<tr><td colspan="4">No audit events.</td></tr>'}</tbody>
-  </table>
+  <details class="admin-section">
+    <summary>Audit Trail</summary>
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Details</th><th>IP</th></tr></thead>
+      <tbody>${auditRows || '<tr><td colspan="4">No audit events.</td></tr>'}</tbody>
+    </table>
+  </details>
 </main>`);
 }
