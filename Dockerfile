@@ -1,12 +1,14 @@
 ## Dockerfile for TLSCheckin application
 
 ## Stage for installing dependencies
-FROM node:20-alpine AS deps 
+FROM node:20-bookworm-slim AS deps 
 
 WORKDIR /app
 
 ## Install necessary build tools for compiling native modules
-RUN apk add --no-cache python3 make g++
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 RUN npm ci
@@ -21,15 +23,13 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 ## Stage for running the application
-FROM node:20-alpine AS runtime
+FROM node:20-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ARG APP_PORT=3110
 ENV PORT=${APP_PORT}
 
 WORKDIR /app
 
-## Install runtime dependencies
-RUN apk add --no-cache libstdc++
 COPY package*.json ./
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist

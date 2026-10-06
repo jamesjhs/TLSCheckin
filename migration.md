@@ -41,11 +41,13 @@ Production and testing must use separate GitHub Environments, separate persisten
 Create `Dockerfile` in the repository root:
 
 ```dockerfile
-FROM node:20-alpine AS deps
+FROM node:20-bookworm-slim AS deps
 
 WORKDIR /app
 
-RUN apk add --no-cache python3 make g++
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 RUN npm ci
@@ -59,15 +61,13 @@ COPY checkins.json checkins.json
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:20-alpine AS runtime
+FROM node:20-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
-ARG APP_PORT=9110
+ARG APP_PORT=3110
 ENV PORT=${APP_PORT}
 
 WORKDIR /app
-
-RUN apk add --no-cache libstdc++
 
 COPY package*.json ./
 COPY --from=build /app/node_modules node_modules
@@ -169,7 +169,7 @@ Add these to both environments:
 
 | Variable | Production value | Testing value |
 | --- | --- | --- |
-| `PORT` | `9110` | `9111` |
+| `PORT` | `3110` | `3111` |
 | `NODE_ENV` | `production` | `production` |
 | `DB_PATH` | `/app/data/tlscheckin.db` | `/app/data/tlscheckin.db` |
 | `CHECKINS_PATH` | `/app/data/checkins.json` | `/app/data/checkins.json` |
@@ -179,7 +179,7 @@ Add these to both environments:
 
 `TLSCHECKIN_BASE_URL` is the only domain-bearing GitHub Environment variable. The current app does not read it directly, but the workflow validates it so `main` cannot accidentally deploy with the testing URL, and `testing` cannot accidentally deploy with the production URL. The workflow derives the runtime `TURNSTILE_HOSTNAMES` value from this URL.
 
-`PORT` must be defined as a GitHub Environment variable in both `production` and `testing`. Use `9110` for production and `9111` for testing. The workflow passes it into the Docker build as `APP_PORT`, writes it into the runtime `.env`, and Cloudflare Tunnel uses the same value in its service URL.
+`PORT` must be defined as a GitHub Environment variable in both `production` and `testing`. Use `3110` for production and `3111` for testing. The workflow passes it into the Docker build as `APP_PORT`, writes it into the runtime `.env`, and Cloudflare Tunnel uses the same value in its service URL.
 
 `CHECKINS_PATH` is deliberately placed in `/app/data` so admin-edited preset SMS messages survive image replacement. If there is no existing `checkins.json` in the mounted directory, TLSCheckin creates one with built-in defaults at startup.
 
@@ -374,8 +374,8 @@ Cloudflare Tunnel public hostname routes can create the required DNS records aut
 
 | Public hostname | Service URL |
 | --- | --- |
-| `tlscheckin.org.uk` | `http://tlscheckin-main:9110` |
-| `testing.tlscheckin.org.uk` | `http://tlscheckin-testing:9111` |
+| `tlscheckin.org.uk` | `http://tlscheckin-main:3110` |
+| `testing.tlscheckin.org.uk` | `http://tlscheckin-testing:3111` |
 
 Cloudflare's Tunnel docs describe this as mapping a public hostname to a local service URL. When you add the route in the dashboard, Cloudflare can create the DNS record pointing the hostname to the tunnel. Do not use `https://tlscheckin.org.uk` or `https://testing.tlscheckin.org.uk` as the Service URL; that would point the tunnel back to itself. Use the local Docker service/container address.
 
@@ -467,7 +467,7 @@ The Compose file expects the existing external Docker network named `proxy`, mat
 docker network ls | grep proxy || docker network create proxy
 ```
 
-The existing `cloudflared` connector container must also be attached to this network so it can reach `http://tlscheckin-main:9110` and `http://tlscheckin-testing:9111`.
+The existing `cloudflared` connector container must also be attached to this network so it can reach `http://tlscheckin-main:3110` and `http://tlscheckin-testing:3111`.
 
 ### 7.4 Confirm Cloudflare Tunnel Configuration
 
@@ -475,8 +475,8 @@ Your existing Cloudflare Tunnel should have:
 
 - A healthy `cloudflared` connector on the Debian server.
 - Membership in the `proxy` Docker network if `cloudflared` runs in Docker. This is the same external network used by Qglimpse.
-- A published application for `tlscheckin.org.uk` with service URL `http://tlscheckin-main:9110`.
-- A published application for `testing.tlscheckin.org.uk` with service URL `http://tlscheckin-testing:9111`.
+- A published application for `tlscheckin.org.uk` with service URL `http://tlscheckin-main:3110`.
+- A published application for `testing.tlscheckin.org.uk` with service URL `http://tlscheckin-testing:3111`.
 - Optional Cloudflare Access protection for the SSH hostname used by GitHub Actions.
 
 A minimal Docker-based `cloudflared` compose shape is:
@@ -495,28 +495,28 @@ networks:
     external: true
 ```
 
-If your `cloudflared` connector runs directly on the host instead of Docker, either move it into the shared Docker network or publish distinct host-only ports for production and testing. The shared Docker network approach is cleaner because production can keep internal `PORT=9110` while testing uses internal `PORT=9111`.
+If your `cloudflared` connector runs directly on the host instead of Docker, either move it into the shared Docker network or publish distinct host-only ports for production and testing. The shared Docker network approach is cleaner because production can keep internal `PORT=3110` while testing uses internal `PORT=3111`.
 
 ### 7.5 Create Deployment Directories
 
 ```bash
-sudo -u dockertunnel mkdir -p /home/dockertunnel/tlscheckin.main-9110/persistent-data-main
-sudo -u dockertunnel mkdir -p /home/dockertunnel/tlscheckin.testing-9111/persistent-data-testing
+sudo -u dockertunnel mkdir -p /home/dockertunnel/tlscheckin.main-3110/persistent-data-main
+sudo -u dockertunnel mkdir -p /home/dockertunnel/tlscheckin.testing-3111/persistent-data-testing
 ```
 
 If migrating existing local data:
 
 ```bash
 # Run from the old app location or upload files first.
-sudo -u dockertunnel cp tlscheckin.db /home/dockertunnel/tlscheckin.main-9110/persistent-data-main/tlscheckin.db
-sudo -u dockertunnel cp checkins.json /home/dockertunnel/tlscheckin.main-9110/persistent-data-main/checkins.json
+sudo -u dockertunnel cp tlscheckin.db /home/dockertunnel/tlscheckin.main-3110/persistent-data-main/tlscheckin.db
+sudo -u dockertunnel cp checkins.json /home/dockertunnel/tlscheckin.main-3110/persistent-data-main/checkins.json
 ```
 
 Keep file ownership writable by the deploy user:
 
 ```bash
-sudo chown -R dockertunnel:dockertunnel /home/dockertunnel/tlscheckin.main-9110
-sudo chown -R dockertunnel:dockertunnel /home/dockertunnel/tlscheckin.testing-9111
+sudo chown -R dockertunnel:dockertunnel /home/dockertunnel/tlscheckin.main-3110
+sudo chown -R dockertunnel:dockertunnel /home/dockertunnel/tlscheckin.testing-3111
 ```
 
 ## 8. First Test Deployment
@@ -524,12 +524,12 @@ sudo chown -R dockertunnel:dockertunnel /home/dockertunnel/tlscheckin.testing-91
 1. Create and push a `testing` branch.
 2. Confirm the GitHub Actions workflow uses the `testing` environment.
 3. Confirm `TLSCHECKIN_BASE_URL` is `https://testing.tlscheckin.org.uk`.
-4. Confirm the testing GitHub Environment variable `PORT` is `9111`.
-5. Confirm the server directory is `/home/dockertunnel/tlscheckin.testing-9111`.
+4. Confirm the testing GitHub Environment variable `PORT` is `3111`.
+5. Confirm the server directory is `/home/dockertunnel/tlscheckin.testing-3111`.
 6. After deployment, run:
 
 ```bash
-cd /home/dockertunnel/tlscheckin.testing-9111
+cd /home/dockertunnel/tlscheckin.testing-3111
 docker compose ps
 docker compose logs --tail=100 tlscheckin
 ```
@@ -555,7 +555,7 @@ https://testing.tlscheckin.org.uk/api/server-time
 7. On the server:
 
 ```bash
-cd /home/dockertunnel/tlscheckin.main-9110
+cd /home/dockertunnel/tlscheckin.main-3110
 docker compose ps
 docker compose logs --tail=100 tlscheckin
 ```
@@ -572,8 +572,8 @@ https://tlscheckin.org.uk/api/server-time
 Check the following:
 
 - `docker compose ps` shows the container as `Up`.
-- Production logs show `TLSCheckin listening on http://localhost:9110`.
-- Testing logs show `TLSCheckin listening on http://localhost:9111`.
+- Production logs show `TLSCheckin listening on http://localhost:3110`.
+- Testing logs show `TLSCheckin listening on http://localhost:3111`.
 - Logs show the correct app timezone.
 - Logs show Turnstile enabled with the expected hostname.
 - The admin URL from `/api/server-time` works.
@@ -603,7 +603,7 @@ Each deployment pins `TLSCHECKIN_IMAGE` to a commit SHA.
 To roll back:
 
 ```bash
-cd /home/dockertunnel/tlscheckin.main-9110
+cd /home/dockertunnel/tlscheckin.main-3110
 nano .env
 ```
 
@@ -621,7 +621,7 @@ docker compose up -d --no-build tlscheckin
 docker compose logs --tail=100 tlscheckin
 ```
 
-Rollback changes the app image. It does not roll back database changes, so back up `/home/dockertunnel/tlscheckin.main-9110/persistent-data-main` before risky releases.
+Rollback changes the app image. It does not roll back database changes, so back up `/home/dockertunnel/tlscheckin.main-3110/persistent-data-main` before risky releases.
 
 ## 12. Troubleshooting
 
@@ -640,6 +640,20 @@ Common causes:
 - Missing `ADMIN_INITIAL_PASSWORD` on first startup.
 - Wrong `DB_ENCRYPTION_KEY` for an existing encrypted database.
 - `/app/data` is not writable.
+
+### Container Restarts With `SIGSEGV`
+
+If logs show `npm error signal SIGSEGV` shortly after `node dist/server.js`, check that the image is built from `node:20-bookworm-slim`, not `node:20-alpine`. TLSCheckin uses `better-sqlite3-multiple-ciphers`, a native SQLite/SQLCipher module; Alpine's musl-based runtime can crash native modules that expect glibc-compatible behavior.
+
+Confirm the Dockerfile starts with:
+
+```dockerfile
+FROM node:20-bookworm-slim AS deps
+...
+FROM node:20-bookworm-slim AS runtime
+```
+
+Then commit, push, and rerun the GitHub Actions deployment so GHCR gets a newly built Debian-based image.
 
 ### Turnstile Fails
 
@@ -666,8 +680,8 @@ Common causes:
 - The app container is not on the `proxy` network.
 - The `cloudflared` container is not on the `proxy` network.
 - The public hostname route points to the public URL instead of the local service URL.
-- The production service URL is not `http://tlscheckin-main:9110`.
-- The testing service URL is not `http://tlscheckin-testing:9111`.
+- The production service URL is not `http://tlscheckin-main:3110`.
+- The testing service URL is not `http://tlscheckin-testing:3111`.
 - The tunnel connector is not healthy in the Cloudflare dashboard.
 
 ### Compose Still Asks For `TLSCHECKIN_DOMAIN`
@@ -675,7 +689,7 @@ Common causes:
 This is a stale Traefik-era compose file. TLSCheckin no longer uses `TLSCHECKIN_DOMAIN`, Traefik labels, or a dedicated `cloudflare-tunnel` network. Confirm the server copy of `docker-compose.yml` contains only the external `proxy` network:
 
 ```bash
-cd /home/dockertunnel/tlscheckin.main-9110
+cd /home/dockertunnel/tlscheckin.main-3110
 grep -n "TLSCHECKIN_DOMAIN\|traefik\|cloudflare-tunnel" docker-compose.yml || true
 grep -n "proxy" docker-compose.yml
 ```
