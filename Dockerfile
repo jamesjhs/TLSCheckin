@@ -6,7 +6,7 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 
 ## Install necessary build tools for compiling native modules
-RUN apt add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++
 
 COPY package*.json ./
 RUN npm ci
@@ -23,11 +23,9 @@ RUN npm prune --omit=dev
 ## Stage for running the application
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
-ARG APP_PORT="${{ vars.PORT || '9110'}}"
+ARG APP_PORT=9110
 ENV PORT=${APP_PORT}
 
-## Copy built application from the build stage
-COPY --from=build /app .
 WORKDIR /app
 
 ## Install runtime dependencies
