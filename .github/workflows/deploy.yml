@@ -126,12 +126,15 @@ jobs:
           test -n "$DB_ENCRYPTION_KEY"
           test -n "$SESSION_SECRET"
           test -n "$ADMIN_INITIAL_PASSWORD"
-          TURNSTILE_HOSTNAMES="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$TLSCHECKIN_BASE_URL")"
+          TLSCHECKIN_HOST="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$TLSCHECKIN_BASE_URL")"
+          TURNSTILE_HOSTNAMES="$TLSCHECKIN_HOST"
+          test -n "$TLSCHECKIN_HOST"
           test -n "$TURNSTILE_HOSTNAMES"
 
           {
             echo "BRANCH_NAME=$BRANCH_NAME"
             echo "TLSCHECKIN_BASE_URL=$TLSCHECKIN_BASE_URL"
+            echo "TLSCHECKIN_HOST=$TLSCHECKIN_HOST"
             echo "TLSCHECKIN_IMAGE=$IMAGE_REF"
             echo "PORT=$PORT"
             echo "NODE_ENV=${NODE_ENV:-production}"

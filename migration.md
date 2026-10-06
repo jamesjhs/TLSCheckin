@@ -12,6 +12,7 @@ The pattern is based on the Docker setup in `C:\GitHub\Qglimpse`: GitHub Actions
 Authoritative docs checked for this guide:
 
 - Docker Debian install: https://docs.docker.com/engine/install/debian/
+- Traefik Docker provider and labels: https://doc.traefik.io/traefik/providers/docker/
 - GitHub Actions variables: https://docs.github.com/en/actions/concepts/workflows-and-actions/variables
 - GitHub Actions secrets: https://docs.github.com/en/actions/reference/security/secrets
 - Cloudflare DNS records: https://developers.cloudflare.com/dns/manage-dns-records/how-to/create-dns-records/
@@ -31,7 +32,8 @@ Push to main/testing
   -> GitHub Actions copies .env and docker-compose.yml to Debian over SSH
   -> Debian pulls the exact image tag
   -> Docker Compose restarts tlscheckin on the existing Docker `proxy` network
-  -> Cloudflare Tunnel routes tlscheckin.org.uk or testing.tlscheckin.org.uk to the container
+  -> Cloudflare Tunnel sends tlscheckin.org.uk or testing.tlscheckin.org.uk to Traefik
+  -> Traefik routes by Host header to the TLSCheckin container
 ```
 
 Production and testing must use separate GitHub Environments, separate persistent data directories, and separate Cloudflare Turnstile hostnames/secrets.
@@ -117,12 +119,18 @@ services:
     networks:
       - proxy
 
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.tlscheckin-${BRANCH_NAME:-main}.rule=Host(`${TLSCHECKIN_HOST:?TLSCHECKIN_HOST must be set}`)"
+      - "traefik.http.services.tlscheckin-${BRANCH_NAME:-main}.loadbalancer.server.port=${PORT:?PORT must be set}"
+
 networks:
   proxy:
     external: true
 ```
 
-No ports are published to the public Internet. The existing `cloudflared` connector must be attached to the same external Docker network and route to the container by name.
+No ports are published to the public Internet. TLSCheckin joins the same external `proxy` network as Qglimpse, and Traefik routes to the container through Docker labels.
 
 ## 3. Move `.env` Values To GitHub
 
@@ -177,9 +185,9 @@ Add these to both environments:
 | `TURNSTILE_SITE_KEY` | Site key for `tlscheckin.org.uk`. | Site key for `testing.tlscheckin.org.uk`. |
 | `TLSCHECKIN_BASE_URL` | `https://tlscheckin.org.uk` | `https://testing.tlscheckin.org.uk` |
 
-`TLSCHECKIN_BASE_URL` is the only domain-bearing GitHub Environment variable. The current app does not read it directly, but the workflow validates it so `main` cannot accidentally deploy with the testing URL, and `testing` cannot accidentally deploy with the production URL. The workflow derives the runtime `TURNSTILE_HOSTNAMES` value from this URL.
+`TLSCHECKIN_BASE_URL` is the only domain-bearing GitHub Environment variable. The current app does not read it directly, but the workflow validates it so `main` cannot accidentally deploy with the testing URL, and `testing` cannot accidentally deploy with the production URL. The workflow derives both runtime `TURNSTILE_HOSTNAMES` and Traefik `TLSCHECKIN_HOST` from this URL.
 
-`PORT` must be defined as a GitHub Environment variable in both `production` and `testing`. Use `3110` for production and `3111` for testing. The workflow passes it into the Docker build as `APP_PORT`, writes it into the runtime `.env`, and Cloudflare Tunnel uses the same value in its service URL.
+`PORT` must be defined as a GitHub Environment variable in both `production` and `testing`. Use `3110` for production and `3111` for testing. The workflow passes it into the Docker build as `APP_PORT`, writes it into the runtime `.env`, and Traefik uses the same value in its `loadbalancer.server.port` label.
 
 `CHECKINS_PATH` is deliberately placed in `/app/data` so admin-edited preset SMS messages survive image replacement. If there is no existing `checkins.json` in the mounted directory, TLSCheckin creates one with built-in defaults at startup.
 
@@ -316,12 +324,15 @@ jobs:
           test -n "$DB_ENCRYPTION_KEY"
           test -n "$SESSION_SECRET"
           test -n "$ADMIN_INITIAL_PASSWORD"
-          TURNSTILE_HOSTNAMES="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$TLSCHECKIN_BASE_URL")"
+          TLSCHECKIN_HOST="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$TLSCHECKIN_BASE_URL")"
+          TURNSTILE_HOSTNAMES="$TLSCHECKIN_HOST"
+          test -n "$TLSCHECKIN_HOST"
           test -n "$TURNSTILE_HOSTNAMES"
 
           {
             echo "BRANCH_NAME=$BRANCH_NAME"
             echo "TLSCHECKIN_BASE_URL=$TLSCHECKIN_BASE_URL"
+            echo "TLSCHECKIN_HOST=$TLSCHECKIN_HOST"
             echo "TLSCHECKIN_IMAGE=$IMAGE_REF"
             echo "PORT=$PORT"
             echo "NODE_ENV=${NODE_ENV:-production}"
@@ -368,16 +379,23 @@ jobs:
 
 Update `SSH_HOST` and `SSH_USER` if your existing remote server uses different values. If you do not use Cloudflare Access for SSH, remove the `cloudflared` install and `ProxyCommand` parts and use ordinary SSH.
 
-## 5. Prepare Cloudflare Tunnel Routes
+## 5. Prepare Traefik And Cloudflare Routes
 
-Cloudflare Tunnel public hostname routes can create the required DNS records automatically. In the Cloudflare Zero Trust dashboard, publish these applications on your tunnel:
+TLSCheckin should be routed by Traefik, not directly by Cloudflare Tunnel. The request path is:
 
-| Public hostname | Service URL |
+```text
+Browser -> Cloudflare -> cloudflared -> Traefik -> tlscheckin-main:3110
+Browser -> Cloudflare -> cloudflared -> Traefik -> tlscheckin-testing:3111
+```
+
+In Cloudflare Zero Trust, the public hostname route should point to your existing Traefik service, using the same pattern that already works for Qglimpse. For example, if the Traefik container is named `traefik` and is attached to the `proxy` network:
+
+| Public hostname | Cloudflare Tunnel service URL |
 | --- | --- |
-| `tlscheckin.org.uk` | `http://tlscheckin-main:3110` |
-| `testing.tlscheckin.org.uk` | `http://tlscheckin-testing:3111` |
+| `tlscheckin.org.uk` | `http://traefik:80` |
+| `testing.tlscheckin.org.uk` | `http://traefik:80` |
 
-Cloudflare's Tunnel docs describe this as mapping a public hostname to a local service URL. When you add the route in the dashboard, Cloudflare can create the DNS record pointing the hostname to the tunnel. Do not use `https://tlscheckin.org.uk` or `https://testing.tlscheckin.org.uk` as the Service URL; that would point the tunnel back to itself. Use the local Docker service/container address.
+Use the actual Traefik container name and port from your existing server. Do not set the Cloudflare Tunnel service URL to `https://tlscheckin.org.uk`; that would point the tunnel back to itself. Do not point Cloudflare directly at `http://tlscheckin-main:3110` if you want Traefik to own routing.
 
 SSH for deployment is separate from the TLSCheckin public hostnames. This guide assumes GitHub Actions connects through:
 
@@ -411,7 +429,7 @@ Testing widget:
 
 Cloudflare requires server-side validation through Siteverify. TLSCheckin already validates Turnstile server-side; the migration task is to make sure the Docker runtime receives the secret and hostname list. Do not put `TURNSTILE_SECRET` in repository files or browser code.
 
-## 7. Prepare Debian, Docker, And Cloudflare Tunnel
+## 7. Prepare Debian, Docker, Traefik, And Cloudflare Tunnel
 
 Run on the remote Debian server.
 
@@ -467,26 +485,26 @@ The Compose file expects the existing external Docker network named `proxy`, mat
 docker network ls | grep proxy || docker network create proxy
 ```
 
-The existing `cloudflared` connector container must also be attached to this network so it can reach `http://tlscheckin-main:3110` and `http://tlscheckin-testing:3111`.
+Traefik must be attached to this network so it can discover and route to `tlscheckin-main:3110` and `tlscheckin-testing:3111`. If `cloudflared` routes to Traefik by container name, `cloudflared` must also be attached to this network.
 
-### 7.4 Confirm Cloudflare Tunnel Configuration
+### 7.4 Confirm Traefik And Cloudflare Tunnel Configuration
 
-Your existing Cloudflare Tunnel should have:
+Your existing routing stack should have:
 
 - A healthy `cloudflared` connector on the Debian server.
-- Membership in the `proxy` Docker network if `cloudflared` runs in Docker. This is the same external network used by Qglimpse.
-- A published application for `tlscheckin.org.uk` with service URL `http://tlscheckin-main:3110`.
-- A published application for `testing.tlscheckin.org.uk` with service URL `http://tlscheckin-testing:3111`.
+- Traefik attached to the `proxy` Docker network. This is the same external network used by Qglimpse.
+- The TLSCheckin containers attached to the `proxy` network.
+- Cloudflare Tunnel public hostname routes pointing to Traefik, not directly to TLSCheckin.
+- Traefik labels on TLSCheckin for `Host(\`tlscheckin.org.uk\`)` and `Host(\`testing.tlscheckin.org.uk\`)`.
 - Optional Cloudflare Access protection for the SSH hostname used by GitHub Actions.
 
-A minimal Docker-based `cloudflared` compose shape is:
+A minimal Traefik network shape is:
 
 ```yaml
 services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
+  traefik:
+    image: traefik:v3
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
     networks:
       - proxy
 
@@ -495,7 +513,7 @@ networks:
     external: true
 ```
 
-If your `cloudflared` connector runs directly on the host instead of Docker, either move it into the shared Docker network or publish distinct host-only ports for production and testing. The shared Docker network approach is cleaner because production can keep internal `PORT=3110` while testing uses internal `PORT=3111`.
+If your `cloudflared` connector runs in Docker and points to Traefik by container name, it also needs to be on `proxy`. If it points to Traefik through a host port, it does not need to share the Docker network.
 
 ### 7.5 Create Deployment Directories
 
@@ -580,7 +598,8 @@ Check the following:
 - New/edited check-in presets persist after container restart.
 - The database file exists under `persistent-data-main` or `persistent-data-testing`.
 - Cloudflare Tunnel is healthy.
-- Cloudflare Tunnel public hostname routes point to the expected Docker service URLs.
+- Cloudflare Tunnel public hostname routes point to Traefik.
+- Traefik has routers for `tlscheckin.org.uk` and `testing.tlscheckin.org.uk`.
 
 Restart test:
 
@@ -665,7 +684,7 @@ Check:
 - The Cloudflare widget allows the same hostname.
 - The app logs do not show Siteverify errors.
 
-### Cloudflare Tunnel Route Fails
+### Traefik Or Cloudflare Route Fails
 
 Check:
 
@@ -673,25 +692,36 @@ Check:
 docker network inspect proxy
 docker compose config
 docker compose ps
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 ```
 
 Common causes:
 
 - The app container is not on the `proxy` network.
-- The `cloudflared` container is not on the `proxy` network.
-- The public hostname route points to the public URL instead of the local service URL.
-- The production service URL is not `http://tlscheckin-main:3110`.
-- The testing service URL is not `http://tlscheckin-testing:3111`.
+- Traefik is not on the `proxy` network.
+- The Cloudflare Tunnel route points directly at TLSCheckin instead of Traefik.
+- The Cloudflare Tunnel route points to the public URL instead of the local Traefik service URL.
+- `TLSCHECKIN_HOST` is missing from the server `.env`.
+- Traefik has stale labels from an older deployment.
 - The tunnel connector is not healthy in the Cloudflare dashboard.
 
-### Compose Still Asks For `TLSCHECKIN_DOMAIN`
-
-This is a stale Traefik-era compose file. TLSCheckin no longer uses `TLSCHECKIN_DOMAIN`, Traefik labels, or a dedicated `cloudflare-tunnel` network. Confirm the server copy of `docker-compose.yml` contains only the external `proxy` network:
+Useful checks:
 
 ```bash
 cd /home/dockertunnel/tlscheckin.main-3110
-grep -n "TLSCHECKIN_DOMAIN\|traefik\|cloudflare-tunnel" docker-compose.yml || true
-grep -n "proxy" docker-compose.yml
+grep -n "TLSCHECKIN_HOST\|traefik" .env docker-compose.yml
+docker compose config
+docker network inspect proxy --format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' | sort
+```
+
+### Compose Still Asks For `TLSCHECKIN_DOMAIN`
+
+This is a stale early Traefik compose file. TLSCheckin now uses `TLSCHECKIN_HOST`, which is derived from `TLSCHECKIN_BASE_URL` by the workflow. Confirm the server copy of `docker-compose.yml` references `TLSCHECKIN_HOST`, not `TLSCHECKIN_DOMAIN`:
+
+```bash
+cd /home/dockertunnel/tlscheckin.main-3110
+grep -n "TLSCHECKIN_DOMAIN" docker-compose.yml || true
+grep -n "TLSCHECKIN_HOST\|traefik\|proxy" docker-compose.yml
 ```
 
 If the stale labels are present, rerun the GitHub Actions deployment after committing the current `docker-compose.yml`, or manually copy the updated file to the deploy directory.
@@ -714,10 +744,11 @@ Check:
 - GitHub Environments `production` and `testing` created.
 - All `.env` values moved to GitHub variables/secrets.
 - No secret values committed.
-- Cloudflare Tunnel public hostname routes created for `tlscheckin.org.uk` and `testing.tlscheckin.org.uk`.
+- Cloudflare Tunnel public hostname routes point to Traefik for `tlscheckin.org.uk` and `testing.tlscheckin.org.uk`.
+- Traefik labels are present in `docker-compose.yml`.
 - Cloudflare Turnstile configured for both hostnames.
 - Debian Docker Engine and Compose plugin installed.
-- The ingress container attached to the `proxy` network.
+- Traefik attached to the `proxy` network.
 - Persistent data directories created and backed up.
 - Testing deployment verified.
 - Production deployment verified.
