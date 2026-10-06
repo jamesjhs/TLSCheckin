@@ -5,7 +5,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { ensureCheckinsFile, normalizeCheckinMessage, readCheckinPresets, saveCheckinPresets } from './checkins.js';
-import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, updateUserSmsPreferences, claimAcknowledgementSms, markAcknowledgementSmsSent, markAcknowledgementSmsFailed, getSmsSettings, updateSmsSettings, type AcknowledgementSmsCandidate, type UserRow } from './db.js';
+import { initDb, getAdmin, recordAudit, findUserByIdentity, findUserById, updateLastSeen, upsertUserLocation, getFollowedUserStatuses, recordStatusViews, recordPersonalMessageViews, savePersonalMessage, getCurrentPersonalMessage, updateUserPassword, getFriendSummary, requestFollow, approveFollowRequest, denyFollowRequest, revokeFollowerAccess, createUser, deleteUser, listUsers, setFollows, getFollowedIds, listAudit, getDb, getUserSecretLink, findUserSecretLinkByTokenHash, upsertUserSecretLink, rotateUserSecretLink, updateUserSmsPreferences, claimAcknowledgementSms, markAcknowledgementSmsSent, markAcknowledgementSmsFailed, getSmsSettings, updateSmsSettings, type AcknowledgementSmsCandidate, type UserRow } from './db.js';
 import { noCache, requireAdmin, requireAdminPage } from './middleware.js';
 import { getTurnstileConfig, verifyTurnstileToken } from './turnstile.js';
 import { appTimezone, formatLocalFooter, localDdmmyy, localYymmdd, nowMs } from './time.js';
@@ -71,11 +71,14 @@ function normalizeIdentity(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function parseCheckinCode(raw: unknown): { datePart: string; identity: string } | null {
+function parseCheckinCode(raw: unknown): { secret: string; identity: string } | null {
   const value = String(raw ?? '').trim();
-  const match = /^(\d{6})-?(\d{4}[a-z]{2})$/i.exec(value);
+  const legacyMatch = /^(\d{6})(\d{4}[a-z]{2})$/i.exec(value);
+  if (legacyMatch) return { secret: legacyMatch[1], identity: normalizeIdentity(legacyMatch[2]) };
+
+  const match = /^(.+)-(\d{4}[a-z]{2})$/i.exec(value);
   if (!match) return null;
-  return { datePart: match[1], identity: normalizeIdentity(match[2]) };
+  return { secret: match[1], identity: normalizeIdentity(match[2]) };
 }
 
 function selectedIds(value: unknown): number[] {
@@ -122,7 +125,9 @@ function secretUrl(req: Request, token: string): string {
 function buildStatusLines(user: UserRow, previousLastSeenAt: number | null): { lines: string[]; smsCandidates: AcknowledgementSmsCandidate[] } {
   const followed = getFollowedUserStatuses(user.id);
   const lines = followed.length ? followed.map((followedUser) => formatFollowedStatusLine(followedUser, previousLastSeenAt)) : ['Login noted'];
-  return { lines, smsCandidates: recordStatusViews(user.id, followed) };
+  const smsCandidates = recordStatusViews(user.id, followed);
+  recordPersonalMessageViews(user.id, followed);
+  return { lines, smsCandidates };
 }
 
 async function sendAcknowledgementSmsMessages(candidates: AcknowledgementSmsCandidate[], ip: string): Promise<void> {
@@ -178,6 +183,17 @@ function wantsJson(req: Request): boolean {
   return req.is('application/json') === 'application/json' || req.accepts(['html', 'json']) === 'json';
 }
 
+function wantsHtml(req: Request): boolean {
+  return req.accepts(['html', 'json']) === 'html' && req.is('application/json') !== 'application/json';
+}
+
+async function userSecretMatches(user: UserRow, secret: string): Promise<boolean> {
+  if (user.user_password_hash) {
+    return bcrypt.compare(secret, user.user_password_hash);
+  }
+  return secret === localDdmmyy();
+}
+
 type AdminRenderOptions = {
   checkinPresetStatus?: string;
   checkinPresetStatusIsError?: boolean;
@@ -197,7 +213,13 @@ async function renderUserLanding(
   linkStatus?: string,
   linkStatusIsError = false,
   smsStatus?: string,
-  smsStatusIsError = false
+  smsStatusIsError = false,
+  personalMessageStatus?: string,
+  personalMessageStatusIsError = false,
+  passwordStatus?: string,
+  passwordStatusIsError = false,
+  friendsStatus?: string,
+  friendsStatusIsError = false
 ): Promise<void> {
   const secretLink = getDisplaySecretUrl(req, user, generatedSecretUrl);
   const status = buildStatusLines(user, previousLastSeenAt);
@@ -212,8 +234,28 @@ async function renderUserLanding(
     ackSmsEnabled: user.ack_sms_enabled === 1,
     smsPreviewText: ACKNOWLEDGEMENT_SMS_TEXT,
     smsStatus,
-    smsStatusIsError
+    smsStatusIsError,
+    personalMessage: getCurrentPersonalMessage(user.id),
+    personalMessageStatus,
+    personalMessageStatusIsError,
+    userPasswordSet: Boolean(user.user_password_hash),
+    passwordStatus,
+    passwordStatusIsError,
+    friends: getFriendSummary(user.id),
+    friendsStatus,
+    friendsStatusIsError
   }));
+}
+
+async function respondFriendAction(req: Request, res: Response, user: UserRow, ok: boolean, message: string): Promise<void> {
+  if (!wantsHtml(req)) {
+    res.status(ok ? 200 : 400).json({ ok, message });
+    return;
+  }
+
+  const refreshedUser = findUserById(user.id) ?? user;
+  res.status(ok ? 200 : 400);
+  await renderUserLanding(req, res, refreshedUser, undefined, refreshedUser.last_seen_at, undefined, false, undefined, false, undefined, false, undefined, false, message, !ok);
 }
 
 async function establishUserSession(req: Request, userId: number): Promise<void> {
@@ -263,15 +305,15 @@ app.post('/api/checkin', publicLimiter, async (req, res) => {
     return;
   }
 
-  if (parsed.datePart !== localDdmmyy()) {
-    recordAudit('public_invalid_submission', { reason: 'wrong_date' }, ip);
+  const user = findUserByIdentity(parsed.identity);
+  if (!user) {
+    recordAudit('public_invalid_submission', { reason: 'unknown_identity' }, ip);
     res.json({ redirect: true });
     return;
   }
 
-  const user = findUserByIdentity(parsed.identity);
-  if (!user) {
-    recordAudit('public_invalid_submission', { reason: 'unknown_identity' }, ip);
+  if (!await userSecretMatches(user, parsed.secret)) {
+    recordAudit('public_invalid_submission', { reason: user.user_password_hash ? 'bad_user_password' : 'wrong_date' }, ip);
     res.json({ redirect: true });
     return;
   }
@@ -290,7 +332,10 @@ app.post('/api/checkin', publicLimiter, async (req, res) => {
       secretUrl: secretLink.displaySecretUrl,
       phoneNumber: user.phone_number ?? '',
       ackSmsEnabled: user.ack_sms_enabled === 1,
-      smsPreviewText: ACKNOWLEDGEMENT_SMS_TEXT
+      smsPreviewText: ACKNOWLEDGEMENT_SMS_TEXT,
+      personalMessage: getCurrentPersonalMessage(user.id),
+      userPasswordSet: Boolean(user.user_password_hash),
+      friends: getFriendSummary(user.id)
     })
   });
 });
@@ -411,6 +456,210 @@ app.post('/api/sms-preferences', async (req, res) => {
     phoneNumber: normalized.phoneNumber,
     ackSmsEnabled
   });
+});
+
+app.post('/api/personal-message', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+
+  const message = String(((req.body ?? {}) as Record<string, unknown>).message ?? '').trim();
+  if (message.length > 160) {
+    if (wantsJson(req)) {
+      res.status(400).json({ ok: false, message: 'Messages are limited to 160 characters.' });
+    } else {
+      res.status(400);
+      await renderUserLanding(req, res, user, undefined, user.last_seen_at, undefined, false, undefined, false, 'Messages are limited to 160 characters.', true);
+    }
+    return;
+  }
+
+  savePersonalMessage(user.id, message);
+  recordAudit(message ? 'personal_message_saved' : 'personal_message_cleared', {
+    user: user.identity,
+    message_length: message.length
+  }, clientIp(req));
+
+  const savedMessage = getCurrentPersonalMessage(user.id);
+  const result = {
+    ok: true,
+    message: savedMessage ? 'Message saved for followers.' : 'Message cleared.',
+    personalMessage: savedMessage
+  };
+  if (wantsJson(req)) {
+    res.json(result);
+  } else {
+    const refreshedUser = findUserById(user.id) ?? user;
+    await renderUserLanding(req, res, refreshedUser, undefined, refreshedUser.last_seen_at, undefined, false, undefined, false, result.message);
+  }
+});
+
+app.post('/api/user-password', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+  const currentUser = user;
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const newPassword = String(body.newPassword ?? '');
+  const confirmPassword = String(body.confirmPassword ?? '');
+  async function respond(statusCode: number, result: { ok: boolean; message: string; userPasswordSet?: boolean }): Promise<void> {
+    if (wantsJson(req)) {
+      res.status(statusCode).json(result);
+      return;
+    }
+
+    const refreshedUser = findUserById(currentUser.id) ?? currentUser;
+    res.status(statusCode);
+    await renderUserLanding(req, res, refreshedUser, undefined, refreshedUser.last_seen_at, undefined, false, undefined, false, undefined, false, result.message, !result.ok);
+  }
+
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    await respond(400, { ok: false, message: 'Password must be 8 to 128 characters.' });
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    await respond(400, { ok: false, message: 'Passwords do not match.' });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  updateUserPassword(user.id, passwordHash);
+  recordAudit('user_password_set', { user: user.identity }, clientIp(req));
+  await respond(200, { ok: true, message: 'Custom password set.', userPasswordSet: true });
+});
+
+app.delete('/api/user-password', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    res.status(401).json({ ok: false, message: 'Login required.' });
+    return;
+  }
+
+  updateUserPassword(user.id, null);
+  recordAudit('user_password_cleared', { user: user.identity }, clientIp(req));
+  res.json({ ok: true, message: 'Using default date secret.', userPasswordSet: false });
+});
+
+app.post('/api/friends/request', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+
+  const identity = normalizeIdentity(String(((req.body ?? {}) as Record<string, unknown>).identity || ''));
+  if (!/^\d{4}[a-z]{2}$/.test(identity)) {
+    await respondFriendAction(req, res, user, false, 'Enter a valid username.');
+    return;
+  }
+
+  const result = requestFollow(user.id, identity);
+  if (!result.ok) {
+    await respondFriendAction(req, res, user, false, result.reason === 'self' ? 'You cannot add yourself.' : 'User not found.');
+    return;
+  }
+
+  if (result.status === 'already_following') {
+    await respondFriendAction(req, res, user, true, `You already follow ${result.target.identity}.`);
+    return;
+  }
+  if (result.status === 'already_pending') {
+    await respondFriendAction(req, res, user, true, `Request already sent to ${result.target.identity}.`);
+    return;
+  }
+
+  recordAudit('follow_request_created', { requester: user.identity, target: result.target.identity }, clientIp(req));
+  await respondFriendAction(req, res, user, true, `Friend request sent to ${result.target.identity}.`);
+});
+
+app.post('/api/friends/requests/:id/approve', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+
+  const requesterId = Number(req.params.id);
+  const requester = Number.isInteger(requesterId) ? findUserById(requesterId) : undefined;
+  if (!requester || !approveFollowRequest(user.id, requester.id)) {
+    await respondFriendAction(req, res, user, false, 'Request not found.');
+    return;
+  }
+
+  recordAudit('follow_request_approved', { requester: requester.identity, target: user.identity }, clientIp(req));
+  await respondFriendAction(req, res, user, true, `${requester.identity} can now see your status.`);
+});
+
+app.post('/api/friends/requests/:id/deny', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+
+  const requesterId = Number(req.params.id);
+  const requester = Number.isInteger(requesterId) ? findUserById(requesterId) : undefined;
+  if (!requester || !denyFollowRequest(user.id, requester.id)) {
+    await respondFriendAction(req, res, user, false, 'Request not found.');
+    return;
+  }
+
+  recordAudit('follow_request_denied', { requester: requester.identity, target: user.identity }, clientIp(req));
+  await respondFriendAction(req, res, user, true, `Request from ${requester.identity} denied.`);
+});
+
+app.post('/api/friends/followers/:id/revoke', async (req, res) => {
+  const userId = sessionData(req).userId;
+  const user = userId ? findUserById(userId) : undefined;
+  if (!user) {
+    if (wantsJson(req)) {
+      res.status(401).json({ ok: false, message: 'Login required.' });
+    } else {
+      res.redirect('/');
+    }
+    return;
+  }
+
+  const followerId = Number(req.params.id);
+  const follower = Number.isInteger(followerId) ? findUserById(followerId) : undefined;
+  if (!follower || !revokeFollowerAccess(user.id, follower.id)) {
+    await respondFriendAction(req, res, user, false, 'Follower not found.');
+    return;
+  }
+
+  recordAudit('follower_access_revoked', { follower: follower.identity, followed: user.identity }, clientIp(req));
+  await respondFriendAction(req, res, user, true, `${follower.identity} can no longer see your status.`);
 });
 
 app.post('/api/location', (req, res) => {

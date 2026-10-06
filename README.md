@@ -93,8 +93,9 @@ Valid examples for 15 September 2026:
 On successful username/secret submission:
 
 - Verify Turnstile first.
-- Validate the submitted local server date.
 - Resolve the user identity case-insensitively.
+- If the user has set a custom password, validate the submitted secret against that password.
+- If the user has not set a custom password, validate the submitted secret against the local server date.
 - Immediately update that user's `last_seen`.
 - Start a user session.
 - Record the successful public check-in in the audit trail.
@@ -147,6 +148,12 @@ Acknowledgement received, thank you for using TLS
 ```
 
 When a follower sees a user's current check-in for the first time, the app sends this SMS once if the user has opted in. Repeat logins by the same follower do not send duplicate acknowledgement messages for the same check-in.
+
+The Status and Seen section also lets a logged-in user save or clear a short personal message for followers. The current message is shown after the followed user's timestamp and location, and each follower can see that message only once. Saving a new message replaces the previous burner message and makes the new text available once to each follower.
+
+The landing page includes an expanded Friends section above Secret Link. A user can see users who currently follow them, revoke any follower's access, send a friend request by username, and approve or deny incoming requests. A requested user must approve before the requester can see their status, location, and burner messages.
+
+The landing page includes an expanded Password section just above Logout/Exit. A user can set a custom password for the public Secret box; this password is stored only as a bcrypt hash. Clearing the custom password returns that user to the default local-date secret.
 
 The public check-in, admin login, secret-link PIN, and landing pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The landing page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
 
@@ -406,6 +413,9 @@ These decisions are explicit and should not be guessed differently during develo
 - Public submission accepts both hyphenated and non-hyphenated forms.
 - User identity is case-insensitive and must be unique.
 - Users can follow multiple users.
+- User-added follows require approval through a friend request before data is shared.
+- Users can leave a short personal message for followers; each follower sees the current message only once.
+- Users can set a custom public-login password instead of using the default local-date secret.
 - A successful public submission always updates `last_seen` immediately.
 - Public users get browser sessions after successful username/secret or secret-link PIN login.
 - User secret link codes are 15 URL-safe characters.
