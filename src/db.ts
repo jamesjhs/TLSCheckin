@@ -416,8 +416,11 @@ export function approveFollowRequest(targetId: number, requesterId: number): boo
   const transaction = database.transaction(() => {
     const deleted = database.prepare('DELETE FROM follow_requests WHERE requester_id = ? AND target_id = ?').run(requesterId, targetId);
     if (deleted.changes === 0) return false;
+    database.prepare('DELETE FROM follow_requests WHERE requester_id = ? AND target_id = ?').run(targetId, requesterId);
     database.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id, created_at) VALUES (?, ?, ?)')
       .run(requesterId, targetId, ts);
+    database.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id, created_at) VALUES (?, ?, ?)')
+      .run(targetId, requesterId, ts);
     database.prepare('UPDATE users SET updated_at = ? WHERE id IN (?, ?)').run(ts, requesterId, targetId);
     return true;
   });

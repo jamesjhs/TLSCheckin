@@ -612,8 +612,8 @@ app.post('/api/friends/requests/:id/approve', async (req, res) => {
     return;
   }
 
-  recordAudit('follow_request_approved', { requester: requester.identity, target: user.identity }, clientIp(req));
-  await respondFriendAction(req, res, user, true, `${requester.identity} can now see your status.`);
+  recordAudit('follow_request_approved', { requester: requester.identity, target: user.identity, mutual: true }, clientIp(req));
+  await respondFriendAction(req, res, user, true, `You and ${requester.identity} can now see each other's status.`);
 });
 
 app.post('/api/friends/requests/:id/deny', async (req, res) => {
