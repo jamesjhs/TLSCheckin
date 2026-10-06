@@ -1,6 +1,6 @@
 import { getTurnstileConfig } from './turnstile.js';
 import { formatLocalFooter, formatLocalShort } from './time.js';
-import type { FollowedUserStatusRow, SmsSettings, UserRow } from './db.js';
+import type { FollowedUserStatusRow, FriendSummary, SmsSettings, UserRow } from './db.js';
 
 function escapeHtml(value: string): string {
   return value
@@ -61,6 +61,9 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .section-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
     .section-help { margin: 0; color: #555; font-size: 14px; line-height: 1.45; }
     .lines { text-align: left; line-height: 1.8; min-width: 0; }
+    .message-tools form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+    .message-tools textarea { width: 100%; min-height: 70px; box-sizing: border-box; padding: 9px 10px; border: 1px solid #bbb; border-radius: 2px; resize: vertical; }
+    .message-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .link-tools { width: 100%; }
     .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 0; }
     .link-tools .textbox { width: 120px; }
@@ -79,6 +82,13 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .sms-choice { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: #333; }
     .sms-preview { width: 100%; font-size: 13px; color: #555; line-height: 1.45; }
     .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .friends-tools { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+    .friends-tools form { margin: 0; }
+    .friend-add-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .friend-list { display: grid; gap: 8px; }
+    .friend-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px; }
+    .friend-name { font-weight: 700; }
+    .friend-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .session-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .session-actions form { margin: 0; }
     @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: stretch; } }
@@ -121,7 +131,7 @@ export function publicHomePage(): string {
   <form id="checkin-form" class="stack" autocomplete="off" autocapitalize="off" spellcheck="false">
     <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
     <input id="user" class="textbox" name="user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="User" aria-label="User">
-    <input id="secret" class="textbox" name="secret" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Secret" aria-label="Secret">
+    <input id="secret" class="textbox" name="secret" type="password" autocomplete="new-password" placeholder="Secret" aria-label="Secret">
     ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey ?? '')}" data-action="checkin" data-theme="light" data-callback="onCheckinTurnstileSuccess" data-expired-callback="onCheckinTurnstileExpired" data-error-callback="onCheckinTurnstileError"></div>` : ''}
     <button id="submit" class="button" type="submit">Submit</button>
     <div id="turnstile-status" class="status">${turnstile.enabled ? 'Waiting for Turnstile.' : ''}</div>
@@ -211,7 +221,34 @@ export function userLandingPage(data: {
   smsPreviewText: string;
   smsStatus?: string;
   smsStatusIsError?: boolean;
+  personalMessage?: string;
+  personalMessageStatus?: string;
+  personalMessageStatusIsError?: boolean;
+  userPasswordSet?: boolean;
+  passwordStatus?: string;
+  passwordStatusIsError?: boolean;
+  friends: FriendSummary;
+  friendsStatus?: string;
+  friendsStatusIsError?: boolean;
 }): string {
+  const incomingRows = data.friends.incomingRequests.map((user) => `<div class="friend-row">
+    <span class="friend-name">${escapeHtml(user.identity)}</span>
+    <span class="friend-actions">
+      <form method="post" action="/api/friends/requests/${user.id}/approve"><button class="button" type="submit">Approve</button></form>
+      <form method="post" action="/api/friends/requests/${user.id}/deny"><button class="button" type="submit">Deny</button></form>
+    </span>
+  </div>`).join('');
+  const followerRows = data.friends.followers.map((user) => `<div class="friend-row">
+    <span class="friend-name">${escapeHtml(user.identity)}</span>
+    <span class="friend-actions">
+      <form method="post" action="/api/friends/followers/${user.id}/revoke"><button class="button" type="submit">Revoke Access</button></form>
+    </span>
+  </div>`).join('');
+  const outgoingRows = data.friends.outgoingRequests.map((user) => `<div class="friend-row">
+    <span class="friend-name">${escapeHtml(user.identity)}</span>
+    <span class="muted">Awaiting approval</span>
+  </div>`).join('');
+
   return basePage('TLSCheckin', `
 <main class="center landing-center">
   <div class="stack landing-stack">
@@ -220,6 +257,53 @@ export function userLandingPage(data: {
       <div class="section-body">
         <p class="section-help">Your check-in has been recorded. This section shows the latest status for the people you follow, including whether they have seen your current check-in.</p>
         <div class="lines">${data.lines.map((line) => `<div>${renderLine(line)}</div>`).join('')}</div>
+        <section class="message-tools" aria-label="Personal message">
+          <form id="personal-message-form" method="post" action="/api/personal-message" autocomplete="off">
+            <textarea id="personal-message" name="message" maxlength="160" placeholder="Personal message for followers">${escapeHtml(data.personalMessage ?? '')}</textarea>
+            <div class="message-actions">
+              <button class="button" type="submit">Save Message</button>
+              <button id="clear-personal-message" class="button" type="button">Clear</button>
+            </div>
+          </form>
+          <div id="personal-message-status" class="${data.personalMessageStatusIsError ? 'error' : 'status'}" aria-live="polite">${escapeHtml(data.personalMessageStatus ?? '')}</div>
+        </section>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>Location Sharing</summary>
+      <div class="section-body">
+        <p class="section-help">Share your current browser location when you want the people who follow you to see a map link with your latest check-in status.</p>
+        <section class="location-tools" aria-label="Location sharing">
+          <button id="share-location" class="button" type="button">Share Location</button>
+          <div id="location-status" class="status" aria-live="polite"></div>
+        </section>
+      </div>
+    </details>
+
+    <details class="landing-section" open>
+      <summary>Friends</summary>
+      <div class="section-body">
+        <p class="section-help">Approve requests before another user can see your status, or revoke access for someone who follows you.</p>
+        <section class="friends-tools" aria-label="Friends">
+          <form class="friend-add-form" method="post" action="/api/friends/request" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <input class="textbox" name="identity" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Friend username" aria-label="Friend username" pattern="[0-9]{4}[A-Za-z]{2}" required>
+            <button class="button" type="submit">Add Friend</button>
+          </form>
+          <div id="friends-status" class="${data.friendsStatusIsError ? 'error' : 'status'}" aria-live="polite">${escapeHtml(data.friendsStatus ?? '')}</div>
+          <div class="friend-list" aria-label="Pending friend requests">
+            <div class="muted">Requests to approve</div>
+            ${incomingRows || '<div class="muted">No pending requests.</div>'}
+          </div>
+          <div class="friend-list" aria-label="Followers">
+            <div class="muted">Users who follow you</div>
+            ${followerRows || '<div class="muted">Nobody follows you yet.</div>'}
+          </div>
+          <div class="friend-list" aria-label="Sent friend requests">
+            <div class="muted">Requests you sent</div>
+            ${outgoingRows || '<div class="muted">No sent requests awaiting approval.</div>'}
+          </div>
+        </section>
       </div>
     </details>
 
@@ -271,12 +355,17 @@ export function userLandingPage(data: {
     </details>
 
     <details class="landing-section" open>
-      <summary>Location Sharing</summary>
+      <summary>Password</summary>
       <div class="section-body">
-        <p class="section-help">Share your current browser location when you want the people who follow you to see a map link with your latest check-in status.</p>
-        <section class="location-tools" aria-label="Location sharing">
-          <button id="share-location" class="button" type="button">Share Location</button>
-          <div id="location-status" class="status" aria-live="polite"></div>
+        <p class="section-help">Set your own login password for the Secret box. If no password is set, the default date secret is used.</p>
+        <section class="sms-tools" aria-label="User password settings">
+          <form id="password-form" method="post" action="/api/user-password" autocomplete="off">
+            <input id="new-user-password" class="textbox" name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" placeholder="New password" aria-label="New password">
+            <input id="confirm-user-password" class="textbox" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" placeholder="Confirm password" aria-label="Confirm password">
+            <button class="button" type="submit">${data.userPasswordSet ? 'Update Password' : 'Set Password'}</button>
+            <button id="clear-user-password" class="button" type="button" ${data.userPasswordSet ? '' : 'disabled'}>Use Default</button>
+          </form>
+          <div id="password-status" class="${data.passwordStatusIsError ? 'error' : 'status'}" aria-live="polite">${escapeHtml(data.passwordStatus ?? (data.userPasswordSet ? 'Custom password set.' : 'Using default date secret.'))}</div>
         </section>
       </div>
     </details>
@@ -304,6 +393,9 @@ const rotateButton = document.querySelector('#rotate-form button');
 const shareLocationButton = document.getElementById('share-location');
 const locationStatusBox = document.getElementById('location-status');
 const smsStatusBox = document.getElementById('sms-status');
+const personalMessageStatusBox = document.getElementById('personal-message-status');
+const passwordStatusBox = document.getElementById('password-status');
+const clearPasswordButton = document.getElementById('clear-user-password');
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
@@ -379,6 +471,53 @@ document.getElementById('sms-form').addEventListener('submit', async (event) => 
   smsStatusBox.className = result.ok ? 'status' : 'error';
   smsStatusBox.textContent = result.message || (result.ok ? 'SMS settings saved.' : 'Unable to save SMS settings.');
   if (result.ok && result.phoneNumber !== undefined) document.getElementById('sms-phone').value = result.phoneNumber;
+});
+async function savePersonalMessage(message) {
+  const response = await fetch('/api/personal-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message })
+  }).catch(() => null);
+  const result = response && response.ok ? await response.json() : response ? await response.json().catch(() => ({ ok: false, message: 'Unable to save message.' })) : { ok: false, message: 'Unable to save message.' };
+  personalMessageStatusBox.className = result.ok ? 'status' : 'error';
+  personalMessageStatusBox.textContent = result.message || (result.ok ? 'Message saved.' : 'Unable to save message.');
+  if (result.ok && result.personalMessage !== undefined) document.getElementById('personal-message').value = result.personalMessage;
+}
+document.getElementById('personal-message-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await savePersonalMessage(document.getElementById('personal-message').value.trim());
+});
+document.getElementById('clear-personal-message').addEventListener('click', async () => {
+  document.getElementById('personal-message').value = '';
+  await savePersonalMessage('');
+});
+document.getElementById('password-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const newPassword = document.getElementById('new-user-password').value;
+  const confirmPassword = document.getElementById('confirm-user-password').value;
+  const response = await fetch('/api/user-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPassword, confirmPassword })
+  }).catch(() => null);
+  const result = response && response.ok ? await response.json() : response ? await response.json().catch(() => ({ ok: false, message: 'Unable to save password.' })) : { ok: false, message: 'Unable to save password.' };
+  passwordStatusBox.className = result.ok ? 'status' : 'error';
+  passwordStatusBox.textContent = result.message || (result.ok ? 'Password saved.' : 'Unable to save password.');
+  if (result.ok) {
+    document.getElementById('new-user-password').value = '';
+    document.getElementById('confirm-user-password').value = '';
+    if (clearPasswordButton) clearPasswordButton.disabled = !result.userPasswordSet;
+  }
+});
+clearPasswordButton.addEventListener('click', async () => {
+  const response = await fetch('/api/user-password', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' }
+  }).catch(() => null);
+  const result = response && response.ok ? await response.json() : response ? await response.json().catch(() => ({ ok: false, message: 'Unable to clear password.' })) : { ok: false, message: 'Unable to clear password.' };
+  passwordStatusBox.className = result.ok ? 'status' : 'error';
+  passwordStatusBox.textContent = result.message || (result.ok ? 'Using default date secret.' : 'Unable to clear password.');
+  if (result.ok && clearPasswordButton) clearPasswordButton.disabled = true;
 });
 shareLocationButton.addEventListener('click', () => {
   locationStatusBox.className = 'status';
@@ -496,9 +635,10 @@ export function formatFollowedStatusLine(user: FollowedUserStatusRow, viewerLast
   const location = user.location_latitude !== null && user.location_longitude !== null
     ? ` - Location: ${googleMapsUrl(user.location_latitude, user.location_longitude)}`
     : '';
-  if (!viewerLastSeenAt) return `${base} - Seen you: Not yet${location}`;
+  const personalMessage = user.personal_message ? ` - Message: ${user.personal_message}` : '';
+  if (!viewerLastSeenAt) return `${base}${location}${personalMessage} - Seen you: Not yet`;
   const hasSeenViewer = user.subject_seen_at !== null && user.subject_seen_at >= viewerLastSeenAt;
-  return `${base} - Seen you: ${hasSeenViewer ? 'Yes' : 'Not yet'}${location}`;
+  return `${base}${location}${personalMessage} - Seen you: ${hasSeenViewer ? 'Yes' : 'Not yet'}`;
 }
 
 export function adminLoginPage(adminPath: string, error = ''): string {

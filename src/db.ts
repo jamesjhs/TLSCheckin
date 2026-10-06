@@ -13,6 +13,7 @@ export type UserRow = {
   id: number;
   identity: string;
   last_seen_at: number | null;
+  user_password_hash: string | null;
   phone_number: string | null;
   ack_sms_enabled: number;
   created_at: number;
@@ -34,6 +35,9 @@ export type FollowedUserStatusRow = UserRow & {
   location_latitude: number | null;
   location_longitude: number | null;
   location_shared_at: number | null;
+  personal_message_id: number | null;
+  personal_message: string | null;
+  personal_message_created_at: number | null;
 };
 
 export type AdminRow = {
@@ -58,6 +62,12 @@ export type AcknowledgementSmsCandidate = {
   viewerIdentity: string;
   subjectSeenAt: number;
   phoneNumber: string;
+};
+
+export type FriendSummary = {
+  followers: UserRow[];
+  incomingRequests: UserRow[];
+  outgoingRequests: UserRow[];
 };
 
 function sqlString(value: string): string {
@@ -88,6 +98,7 @@ export async function initDb(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       identity TEXT NOT NULL,
       last_seen_at INTEGER,
+      user_password_hash TEXT,
       phone_number TEXT,
       ack_sms_enabled INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
@@ -105,6 +116,16 @@ export async function initDb(): Promise<void> {
       CHECK (follower_id <> followed_id),
       FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS follow_requests (
+      requester_id INTEGER NOT NULL,
+      target_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (requester_id, target_id),
+      CHECK (requester_id <> target_id),
+      FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS status_views (
@@ -135,6 +156,26 @@ export async function initDb(): Promise<void> {
       shared_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS personal_messages_user_created_idx
+      ON personal_messages (user_id, created_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS personal_message_views (
+      message_id INTEGER NOT NULL,
+      viewer_id INTEGER NOT NULL,
+      viewed_at INTEGER NOT NULL,
+      PRIMARY KEY (message_id, viewer_id),
+      FOREIGN KEY (message_id) REFERENCES personal_messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (viewer_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -175,6 +216,9 @@ export async function initDb(): Promise<void> {
   instance.prepare('CREATE UNIQUE INDEX IF NOT EXISTS user_secret_links_token_unique ON user_secret_links (token) WHERE token IS NOT NULL').run();
 
   const userColumns = instance.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userColumns.some((column) => column.name === 'user_password_hash')) {
+    instance.prepare('ALTER TABLE users ADD COLUMN user_password_hash TEXT').run();
+  }
   if (!userColumns.some((column) => column.name === 'phone_number')) {
     instance.prepare('ALTER TABLE users ADD COLUMN phone_number TEXT').run();
   }
@@ -234,6 +278,12 @@ export function updateUserSmsPreferences(userId: number, phoneNumber: string | n
     .run(phoneNumber, ackSmsEnabled ? 1 : 0, ts, userId);
 }
 
+export function updateUserPassword(userId: number, passwordHash: string | null): void {
+  const ts = nowMs();
+  getDb().prepare('UPDATE users SET user_password_hash = ?, updated_at = ? WHERE id = ?')
+    .run(passwordHash, ts, userId);
+}
+
 export function deleteUser(id: number): UserRow | undefined {
   const database = getDb();
   const user = database.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
@@ -273,7 +323,10 @@ export function getFollowedUserStatuses(followerId: number): FollowedUserStatusR
       subject_status.subject_seen_at AS subject_seen_at,
       user_locations.latitude AS location_latitude,
       user_locations.longitude AS location_longitude,
-      user_locations.shared_at AS location_shared_at
+      user_locations.shared_at AS location_shared_at,
+      current_message.id AS personal_message_id,
+      current_message.message AS personal_message,
+      current_message.created_at AS personal_message_created_at
     FROM follows f
     JOIN users u ON u.id = f.followed_id
     LEFT JOIN status_views viewer_status
@@ -284,14 +337,101 @@ export function getFollowedUserStatuses(followerId: number): FollowedUserStatusR
       AND subject_status.subject_id = ?
     LEFT JOIN user_locations
       ON user_locations.user_id = u.id
+    LEFT JOIN personal_messages current_message
+      ON current_message.id = (
+        SELECT pm.id
+        FROM personal_messages pm
+        WHERE pm.user_id = u.id
+        ORDER BY pm.created_at DESC, pm.id DESC
+        LIMIT 1
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM personal_message_views pmv
+        WHERE pmv.message_id = current_message.id
+          AND pmv.viewer_id = ?
+      )
     WHERE f.follower_id = ?
     ORDER BY LOWER(u.identity)
-  `).all(followerId, followerId, followerId) as FollowedUserStatusRow[];
+  `).all(followerId, followerId, followerId, followerId) as FollowedUserStatusRow[];
 }
 
 export function getFollowedIds(followerId: number): number[] {
   const rows = getDb().prepare('SELECT followed_id FROM follows WHERE follower_id = ? ORDER BY followed_id').all(followerId) as { followed_id: number }[];
   return rows.map((row) => row.followed_id);
+}
+
+export function getFriendSummary(userId: number): FriendSummary {
+  const database = getDb();
+  const followers = database.prepare(`
+    SELECT u.*
+    FROM follows f
+    JOIN users u ON u.id = f.follower_id
+    WHERE f.followed_id = ?
+    ORDER BY LOWER(u.identity)
+  `).all(userId) as UserRow[];
+  const incomingRequests = database.prepare(`
+    SELECT u.*
+    FROM follow_requests fr
+    JOIN users u ON u.id = fr.requester_id
+    WHERE fr.target_id = ?
+    ORDER BY fr.created_at, LOWER(u.identity)
+  `).all(userId) as UserRow[];
+  const outgoingRequests = database.prepare(`
+    SELECT u.*
+    FROM follow_requests fr
+    JOIN users u ON u.id = fr.target_id
+    WHERE fr.requester_id = ?
+    ORDER BY fr.created_at, LOWER(u.identity)
+  `).all(userId) as UserRow[];
+  return { followers, incomingRequests, outgoingRequests };
+}
+
+export type FollowRequestResult =
+  | { ok: true; status: 'requested'; target: UserRow }
+  | { ok: true; status: 'already_following'; target: UserRow }
+  | { ok: true; status: 'already_pending'; target: UserRow }
+  | { ok: false; reason: 'not_found' | 'self' };
+
+export function requestFollow(requesterId: number, targetIdentity: string): FollowRequestResult {
+  const target = findUserByIdentity(targetIdentity);
+  if (!target) return { ok: false, reason: 'not_found' };
+  if (target.id === requesterId) return { ok: false, reason: 'self' };
+
+  const database = getDb();
+  const existingFollow = database.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?').get(requesterId, target.id);
+  if (existingFollow) return { ok: true, status: 'already_following', target };
+
+  const existingRequest = database.prepare('SELECT 1 FROM follow_requests WHERE requester_id = ? AND target_id = ?').get(requesterId, target.id);
+  if (existingRequest) return { ok: true, status: 'already_pending', target };
+
+  database.prepare('INSERT INTO follow_requests (requester_id, target_id, created_at) VALUES (?, ?, ?)')
+    .run(requesterId, target.id, nowMs());
+  return { ok: true, status: 'requested', target };
+}
+
+export function approveFollowRequest(targetId: number, requesterId: number): boolean {
+  const database = getDb();
+  const ts = nowMs();
+  const transaction = database.transaction(() => {
+    const deleted = database.prepare('DELETE FROM follow_requests WHERE requester_id = ? AND target_id = ?').run(requesterId, targetId);
+    if (deleted.changes === 0) return false;
+    database.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id, created_at) VALUES (?, ?, ?)')
+      .run(requesterId, targetId, ts);
+    database.prepare('UPDATE users SET updated_at = ? WHERE id IN (?, ?)').run(ts, requesterId, targetId);
+    return true;
+  });
+  return transaction() as boolean;
+}
+
+export function denyFollowRequest(targetId: number, requesterId: number): boolean {
+  const result = getDb().prepare('DELETE FROM follow_requests WHERE requester_id = ? AND target_id = ?').run(requesterId, targetId);
+  return result.changes > 0;
+}
+
+export function revokeFollowerAccess(followedId: number, followerId: number): boolean {
+  const result = getDb().prepare('DELETE FROM follows WHERE follower_id = ? AND followed_id = ?').run(followerId, followedId);
+  return result.changes > 0;
 }
 
 export function updateLastSeen(userId: number): number {
@@ -308,6 +448,50 @@ export function upsertUserLocation(userId: number, latitude: number, longitude: 
     ON CONFLICT(user_id)
     DO UPDATE SET latitude = excluded.latitude, longitude = excluded.longitude, shared_at = excluded.shared_at, updated_at = excluded.updated_at
   `).run(userId, latitude, longitude, ts, ts);
+}
+
+export function savePersonalMessage(userId: number, message: string): void {
+  const trimmed = message.trim();
+  const database = getDb();
+  const ts = nowMs();
+  const transaction = database.transaction(() => {
+    database.prepare('DELETE FROM personal_messages WHERE user_id = ?').run(userId);
+    if (trimmed) {
+      database.prepare('INSERT INTO personal_messages (user_id, message, created_at) VALUES (?, ?, ?)')
+        .run(userId, trimmed, ts);
+    }
+    database.prepare('UPDATE users SET updated_at = ? WHERE id = ?').run(ts, userId);
+  });
+  transaction();
+}
+
+export function getCurrentPersonalMessage(userId: number): string {
+  const row = getDb().prepare(`
+    SELECT message
+    FROM personal_messages
+    WHERE user_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(userId) as { message: string } | undefined;
+  return row?.message ?? '';
+}
+
+export function recordPersonalMessageViews(viewerId: number, subjects: FollowedUserStatusRow[]): void {
+  const messageIds = [...new Set(subjects
+    .map((subject) => subject.personal_message_id)
+    .filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0))];
+  if (messageIds.length === 0) return;
+
+  const database = getDb();
+  const ts = nowMs();
+  const insert = database.prepare(`
+    INSERT OR IGNORE INTO personal_message_views (message_id, viewer_id, viewed_at)
+    VALUES (?, ?, ?)
+  `);
+  const transaction = database.transaction(() => {
+    for (const messageId of messageIds) insert.run(messageId, viewerId, ts);
+  });
+  transaction();
 }
 
 export function recordStatusViews(viewerId: number, subjects: UserRow[]): AcknowledgementSmsCandidate[] {
