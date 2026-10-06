@@ -121,6 +121,7 @@ function publicHomeMetadata(): string {
   <meta name="keywords" content="${escapeHtml(keywords)}">
   <meta name="author" content="TLSCheckin">
   <meta name="application-name" content="TLSCheckin">
+  <meta name="msvalidate.01" content="88BD34F5E7BBF8F29A78009F09F7A1AD">
   <meta name="theme-color" content="#ffffff">
   <meta name="subject" content="Private check-in and discreet status visibility for trusted groups">
   <meta name="classification" content="Safety, Privacy, Private Status Check-In, Welfare Check-In">
