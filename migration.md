@@ -41,7 +41,7 @@ Production and testing must use separate GitHub Environments, separate persisten
 Create `Dockerfile` in the repository root:
 
 ```dockerfile
-FROM node:20-bookworm-slim AS deps
+FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ COPY checkins.json checkins.json
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 ARG APP_PORT=3110
@@ -643,14 +643,14 @@ Common causes:
 
 ### Container Restarts With `SIGSEGV`
 
-If logs show `npm error signal SIGSEGV` shortly after `node dist/server.js`, check that the image is built from `node:20-bookworm-slim`, not `node:20-alpine`. TLSCheckin uses `better-sqlite3-multiple-ciphers`, a native SQLite/SQLCipher module; Alpine's musl-based runtime can crash native modules that expect glibc-compatible behavior.
+If logs show `npm error signal SIGSEGV` shortly after `node dist/server.js`, check that the image is built from `node:22-bookworm-slim`, not an older Node or Alpine image. TLSCheckin uses `better-sqlite3-multiple-ciphers`, a native SQLite/SQLCipher module; Alpine's musl-based runtime can crash native modules that expect glibc-compatible behavior.
 
 Confirm the Dockerfile starts with:
 
 ```dockerfile
-FROM node:20-bookworm-slim AS deps
+FROM node:22-bookworm-slim AS deps
 ...
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 ```
 
 Then commit, push, and rerun the GitHub Actions deployment so GHCR gets a newly built Debian-based image.

@@ -1,7 +1,7 @@
 ## Dockerfile for TLSCheckin application
 
 ## Stage for installing dependencies
-FROM node:20-bookworm-slim AS deps 
+FROM node:22-bookworm-slim AS deps 
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 ## Stage for running the application
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ARG APP_PORT=3110
 ENV PORT=${APP_PORT}
