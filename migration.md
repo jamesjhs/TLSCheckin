@@ -368,7 +368,7 @@ jobs:
 
 Update `SSH_HOST` and `SSH_USER` if your existing remote server uses different values. If you do not use Cloudflare Access for SSH, remove the `cloudflared` install and `ProxyCommand` parts and use ordinary SSH.
 
-## 5. Prepare Cloudflare DNS
+## 5. Prepare Cloudflare Tunnel Routes
 
 Cloudflare Tunnel public hostname routes can create the required DNS records automatically. In the Cloudflare Zero Trust dashboard, publish these applications on your tunnel:
 
@@ -467,7 +467,7 @@ The Compose file expects the existing external Docker network named `proxy`, mat
 docker network ls | grep proxy || docker network create proxy
 ```
 
-The existing ingress container, whether `cloudflared` or Traefik, must also be attached to this network so it can reach `http://tlscheckin-main:9110` and `http://tlscheckin-testing:9111`.
+The existing `cloudflared` connector container must also be attached to this network so it can reach `http://tlscheckin-main:9110` and `http://tlscheckin-testing:9111`.
 
 ### 7.4 Confirm Cloudflare Tunnel Configuration
 
@@ -547,7 +547,7 @@ https://testing.tlscheckin.org.uk/api/server-time
 ## 9. First Production Deployment
 
 1. Confirm production GitHub Environment values are present.
-2. Confirm `TURNSTILE_HOSTNAMES` is exactly `tlscheckin.org.uk`.
+2. Confirm `TLSCHECKIN_BASE_URL` is `https://tlscheckin.org.uk`; the workflow derives runtime `TURNSTILE_HOSTNAMES=tlscheckin.org.uk` from this value.
 3. Confirm existing production database files are copied, if migrating current data.
 4. Confirm the existing production `DB_ENCRYPTION_KEY` is used if keeping the old database.
 5. Push to `main`.
@@ -669,6 +669,18 @@ Common causes:
 - The production service URL is not `http://tlscheckin-main:9110`.
 - The testing service URL is not `http://tlscheckin-testing:9111`.
 - The tunnel connector is not healthy in the Cloudflare dashboard.
+
+### Compose Still Asks For `TLSCHECKIN_DOMAIN`
+
+This is a stale Traefik-era compose file. TLSCheckin no longer uses `TLSCHECKIN_DOMAIN`, Traefik labels, or a dedicated `cloudflare-tunnel` network. Confirm the server copy of `docker-compose.yml` contains only the external `proxy` network:
+
+```bash
+cd /home/dockertunnel/tlscheckin.main-9110
+grep -n "TLSCHECKIN_DOMAIN\|traefik\|cloudflare-tunnel" docker-compose.yml || true
+grep -n "proxy" docker-compose.yml
+```
+
+If the stale labels are present, rerun the GitHub Actions deployment after committing the current `docker-compose.yml`, or manually copy the updated file to the deploy directory.
 
 ### GitHub Actions Cannot Pull Or Push GHCR
 
