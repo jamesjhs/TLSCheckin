@@ -23,7 +23,7 @@ RUN npm prune --omit=dev
 ## Stage for running the application
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
-ARG APP_PORT=9110
+ARG APP_PORT=3110
 ENV PORT=${APP_PORT}
 
 WORKDIR /app
