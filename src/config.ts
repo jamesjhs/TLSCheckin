@@ -14,7 +14,7 @@ function optional(name: string): string {
 }
 
 export const config = {
-  port: Number(process.env.PORT || 9110),
+  port: Number(process.env.PORT || 3110),
   dbPath: path.resolve(process.cwd(), process.env.DB_PATH || './data/tlscheckin.db'),
   checkinsPath: path.resolve(process.cwd(), process.env.CHECKINS_PATH || './checkins.json'),
   dbEncryptionKey: required('DB_ENCRYPTION_KEY'),

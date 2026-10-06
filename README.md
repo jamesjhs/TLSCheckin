@@ -25,7 +25,7 @@ A `.env.example` file shall be created for setup by future users.
 
 Required and configurable values:
 
-- `PORT`: app port, default `9110`.
+- `PORT`: app port, default `3110`.
 - `DB_PATH`: SQLCipher database location, within the site root by default.
 - `DB_ENCRYPTION_KEY`: SQLCipher encryption key.
 - `ADMIN_INITIAL_PASSWORD`: initial admin password, used only on first server startup.
@@ -270,13 +270,13 @@ npm start
 Visit:
 
 ```text
-http://localhost:9110/
+http://localhost:3110/
 ```
 
 The admin path uses the `APP_TIMEZONE` date in `yymmdd` format. For example:
 
 ```text
-http://localhost:9110/260915
+http://localhost:3110/260915
 ```
 
 ### pm2 Runtime
@@ -319,7 +319,7 @@ server {
     server_name example.com;
 
     location / {
-        proxy_pass http://127.0.0.1:9110;
+        proxy_pass http://127.0.0.1:3110;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -341,7 +341,7 @@ sudo systemctl reload nginx
 Run the app on localhost with pm2, then point a Cloudflare Tunnel public hostname at:
 
 ```text
-http://localhost:9110
+http://localhost:3110
 ```
 
 Turnstile keys should be configured for the public hostname in Cloudflare and placed in `.env`.
@@ -365,7 +365,7 @@ TURNSTILE_HOSTNAMES=localhost,127.0.0.1
 Port conflict:
 
 ```bash
-sudo ss -ltnp | grep 9110
+sudo ss -ltnp | grep 3110
 ```
 
 Missing environment variables:
@@ -432,7 +432,7 @@ Detailed instructions:
 - Create npm scripts for development, build, start, and any checks/tests.
 - Create `.env.example` with all variables listed in Environment Variables.
 - Implement central configuration loading and validation.
-- Set the default port to `9110`.
+- Set the default port to `3110`.
 - Ensure app pages send headers to disable browser cache.
 - Ensure form fields use autocomplete-disabled markup where applicable.
 - Add local-server-time formatting helpers for `hh:mm dd/mm/yy`, `ddmmyy`, and `yymmdd`.
