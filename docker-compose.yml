@@ -18,8 +18,8 @@ services:
       - ./persistent-data-${BRANCH_NAME:-main}:/app/data
 
     networks:
-      - cloudflare-tunnel
+      - proxy
 
 networks:
-  cloudflare-tunnel:
+  proxy:
     external: true

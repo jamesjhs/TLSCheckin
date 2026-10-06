@@ -168,6 +168,7 @@ jobs:
           fi
 
           mkdir -p "persistent-data-${BRANCH_NAME:-main}"
+          docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
           docker compose pull tlscheckin
           docker compose up -d --no-build --remove-orphans tlscheckin

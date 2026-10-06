@@ -30,7 +30,7 @@ Push to main/testing
   -> GitHub Actions creates runtime .env from GitHub environment secrets/variables
   -> GitHub Actions copies .env and docker-compose.yml to Debian over SSH
   -> Debian pulls the exact image tag
-  -> Docker Compose restarts tlscheckin on the Cloudflare Tunnel Docker network
+  -> Docker Compose restarts tlscheckin on the existing Docker `proxy` network
   -> Cloudflare Tunnel routes tlscheckin.org.uk or testing.tlscheckin.org.uk to the container
 ```
 
@@ -115,10 +115,10 @@ services:
       - ./persistent-data-${BRANCH_NAME:-main}:/app/data
 
     networks:
-      - cloudflare-tunnel
+      - proxy
 
 networks:
-  cloudflare-tunnel:
+  proxy:
     external: true
 ```
 
@@ -358,6 +358,7 @@ jobs:
           fi
 
           mkdir -p "persistent-data-${BRANCH_NAME:-main}"
+          docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
           docker compose pull tlscheckin
           docker compose up -d --no-build --remove-orphans tlscheckin
@@ -460,20 +461,20 @@ sudo chmod 600 /home/dockertunnel/.ssh/authorized_keys
 
 ### 7.3 Create Docker Network
 
-The Compose file expects an external Docker network named `cloudflare-tunnel`:
+The Compose file expects the existing external Docker network named `proxy`, matching Qglimpse:
 
 ```bash
-docker network ls | grep cloudflare-tunnel || docker network create cloudflare-tunnel
+docker network ls | grep proxy || docker network create proxy
 ```
 
-The `cloudflared` connector container must also be attached to this network so it can reach `http://tlscheckin-main:9110` and `http://tlscheckin-testing:9111`.
+The existing ingress container, whether `cloudflared` or Traefik, must also be attached to this network so it can reach `http://tlscheckin-main:9110` and `http://tlscheckin-testing:9111`.
 
 ### 7.4 Confirm Cloudflare Tunnel Configuration
 
 Your existing Cloudflare Tunnel should have:
 
 - A healthy `cloudflared` connector on the Debian server.
-- Membership in the `cloudflare-tunnel` Docker network if `cloudflared` runs in Docker.
+- Membership in the `proxy` Docker network if `cloudflared` runs in Docker. This is the same external network used by Qglimpse.
 - A published application for `tlscheckin.org.uk` with service URL `http://tlscheckin-main:9110`.
 - A published application for `testing.tlscheckin.org.uk` with service URL `http://tlscheckin-testing:9111`.
 - Optional Cloudflare Access protection for the SSH hostname used by GitHub Actions.
@@ -487,10 +488,10 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
     networks:
-      - cloudflare-tunnel
+      - proxy
 
 networks:
-  cloudflare-tunnel:
+  proxy:
     external: true
 ```
 
@@ -655,15 +656,15 @@ Check:
 Check:
 
 ```bash
-docker network inspect cloudflare-tunnel
+docker network inspect proxy
 docker compose config
 docker compose ps
 ```
 
 Common causes:
 
-- The app container is not on the `cloudflare-tunnel` network.
-- The `cloudflared` container is not on the `cloudflare-tunnel` network.
+- The app container is not on the `proxy` network.
+- The `cloudflared` container is not on the `proxy` network.
 - The public hostname route points to the public URL instead of the local service URL.
 - The production service URL is not `http://tlscheckin-main:9110`.
 - The testing service URL is not `http://tlscheckin-testing:9111`.
@@ -690,7 +691,7 @@ Check:
 - Cloudflare Tunnel public hostname routes created for `tlscheckin.org.uk` and `testing.tlscheckin.org.uk`.
 - Cloudflare Turnstile configured for both hostnames.
 - Debian Docker Engine and Compose plugin installed.
-- `cloudflared` attached to the `cloudflare-tunnel` network.
+- The ingress container attached to the `proxy` network.
 - Persistent data directories created and backed up.
 - Testing deployment verified.
 - Production deployment verified.
