@@ -289,6 +289,30 @@ app.get('/api/server-time', (_req, res) => {
   });
 });
 
+app.get('/robots.txt', (_req, res) => {
+  const baseUrl = config.tlscheckinBaseUrl.replace(/\/+$/, '');
+  res.type('text/plain').send([
+    'User-agent: *',
+    'Allow: /$',
+    'Allow: /assets/tls-logo.png',
+    'Disallow: /api/',
+    'Disallow: /s/',
+    `Sitemap: ${baseUrl}/sitemap.xml`
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  const baseUrl = config.tlscheckinBaseUrl.replace(/\/+$/, '');
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${baseUrl}/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`);
+});
+
 app.post('/api/checkin', publicLimiter, async (req, res) => {
   const ip = clientIp(req);
   const turnstile = await verifyTurnstileToken(turnstileToken(req), 'checkin', ip);

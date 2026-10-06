@@ -1,5 +1,6 @@
 import { getTurnstileConfig } from './turnstile.js';
 import { formatLocalFooter, formatLocalShort } from './time.js';
+import { config } from './config.js';
 import type { FollowedUserStatusRow, FriendSummary, SmsSettings, UserRow } from './db.js';
 
 function escapeHtml(value: string): string {
@@ -30,14 +31,127 @@ function renderLine(line: string): string {
   return html;
 }
 
-function basePage(title: string, body: string, extraHead = ''): string {
+type BasePageOptions = {
+  robots?: string;
+};
+
+function absoluteUrl(path = '/'): string {
+  const base = config.tlscheckinBaseUrl.replace(/\/+$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+
+function jsonScript(value: unknown): string {
+  return JSON.stringify(value, null, 2).replace(/<\/script/gi, '<\\/script');
+}
+
+function publicHomeMetadata(): string {
+  const canonicalUrl = absoluteUrl('/');
+  const logoUrl = absoluteUrl('/assets/tls-logo.png');
+  const description = 'TLSCheckin is a discreet private check-in system for trusted groups who need quiet reassurance, controlled status visibility, and optional location sharing.';
+  const keywords = [
+    'private check-in system',
+    'discreet safety check-in',
+    'trusted group status',
+    'welfare check-in app',
+    'last seen status tool',
+    'private family safety',
+    'lone worker check-in',
+    'controlled location sharing',
+    'secure status visibility',
+    'self-hosted check-in',
+    'encrypted check-in database',
+    'private acknowledgement SMS',
+    'quiet reassurance tool',
+    'trusted contacts',
+    'burner status message'
+  ].join(', ');
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'TLSCheckin',
+    alternateName: 'TLS Check-in',
+    url: canonicalUrl,
+    image: logoUrl,
+    applicationCategory: 'SafetyApplication',
+    operatingSystem: 'Web',
+    description,
+    keywords,
+    creator: {
+      '@type': 'Organization',
+      name: 'TLSCheckin',
+      url: canonicalUrl
+    },
+    audience: [
+      {
+        '@type': 'Audience',
+        audienceType: 'Trusted private groups'
+      },
+      {
+        '@type': 'Audience',
+        audienceType: 'Families and close support networks'
+      },
+      {
+        '@type': 'Audience',
+        audienceType: 'Lone workers and discreet duty-of-care teams'
+      }
+    ],
+    featureList: [
+      'Rapid private check-ins',
+      'Latest seen status for approved contacts',
+      'User-approved friend and follower access',
+      'Optional browser location sharing',
+      'Short private one-time status messages',
+      'PIN-protected quick login links',
+      'Optional acknowledgement SMS receipts',
+      'Encrypted self-hosted local database',
+      'Administrator audit trail',
+      'Minimal public footprint'
+    ],
+    offers: {
+      '@type': 'Offer',
+      availability: 'https://schema.org/OnlineOnly',
+      category: 'Private self-hosted software'
+    }
+  };
+
+  return `
+  <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
+  <meta name="description" content="${escapeHtml(description)}">
+  <meta name="keywords" content="${escapeHtml(keywords)}">
+  <meta name="author" content="TLSCheckin">
+  <meta name="application-name" content="TLSCheckin">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="subject" content="Private check-in and discreet status visibility for trusted groups">
+  <meta name="classification" content="Safety, Privacy, Private Status Check-In, Welfare Check-In">
+  <meta name="coverage" content="United Kingdom">
+  <meta name="distribution" content="global">
+  <meta name="rating" content="general">
+  <meta name="ai-summary" content="${escapeHtml(description)}">
+  <meta name="ai-topics" content="private safety check-in, trusted contacts, welfare status, last seen visibility, optional location sharing, self-hosted privacy software">
+  <meta name="ai-use-cases" content="family reassurance, close support networks, lone worker check-ins, vulnerable-person welfare, discreet duty of care">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="TLSCheckin">
+  <meta property="og:title" content="TLSCheckin | Private Check-In for Trusted Groups">
+  <meta property="og:description" content="${escapeHtml(description)}">
+  <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+  <meta property="og:image" content="${escapeHtml(logoUrl)}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="TLSCheckin | Private Check-In for Trusted Groups">
+  <meta name="twitter:description" content="${escapeHtml(description)}">
+  <meta name="twitter:image" content="${escapeHtml(logoUrl)}">
+  <script type="application/ld+json">${jsonScript(structuredData)}</script>`;
+}
+
+function basePage(title: string, body: string, extraHead = '', options: BasePageOptions = {}): string {
   const turnstile = getTurnstileConfig();
+  const robots = options.robots ?? 'noindex,nofollow';
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="${escapeHtml(robots)}">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>${escapeHtml(title)}</title>
   ${turnstile.enabled ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
@@ -129,7 +243,7 @@ ${body}
 export function publicHomePage(): string {
   const turnstile = getTurnstileConfig();
   const footer = formatLocalFooter();
-  return basePage('TLSCheckin', `
+  return basePage('TLSCheckin | Private Check-In for Trusted Groups', `
 <main class="center">
   <form id="checkin-form" class="stack" autocomplete="off" autocapitalize="off" spellcheck="false">
     <img class="home-logo" src="/assets/tls-logo.png" alt="TLS">
@@ -190,7 +304,7 @@ form.addEventListener('submit', async (event) => {
   if (result.redirect) { leave(); return; }
   document.open(); document.write(result.html); document.close();
 });
-</script>`);
+</script>`, publicHomeMetadata(), { robots: 'index,follow,max-image-preview:large' });
 }
 
 export function resultPage(lines: string[]): string {

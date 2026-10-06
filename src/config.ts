@@ -23,6 +23,7 @@ export const config = {
   appTimezone: optional('APP_TIMEZONE') || 'Europe/London',
   turnstileSiteKey: optional('TURNSTILE_SITE_KEY') || '0x4AAAAAAE2-TTENBA11-lab',
   turnstileSecretKey: optional('TURNSTILE_SECRET') || optional('TURNSTILE_SECRET_KEY'),
+  tlscheckinBaseUrl: optional('TLSCHECKIN_BASE_URL') || 'https://tlscheckin.org.uk',
   turnstileHostnames: (optional('TURNSTILE_HOSTNAMES') || 'localhost,127.0.0.1')
     .split(',')
     .map((hostname) => hostname.trim().toLowerCase())
