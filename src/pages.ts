@@ -58,40 +58,43 @@ function basePage(title: string, body: string, extraHead = ''): string {
     .landing-section { border: 1px solid #ddd; border-radius: 4px; background: #fff; }
     .landing-section summary { cursor: pointer; padding: 12px 14px; font-weight: 700; }
     .landing-section summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
-    .section-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
-    .section-help { margin: 0; color: #555; font-size: 14px; line-height: 1.45; }
+    .section-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+    .section-help { align-self: stretch; margin: 0; color: #555; font-size: 14px; line-height: 1.45; text-align: left; }
     .lines { text-align: left; line-height: 1.8; min-width: 0; }
-    .message-tools form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-    .message-tools textarea { width: 100%; min-height: 70px; box-sizing: border-box; padding: 9px 10px; border: 1px solid #bbb; border-radius: 2px; resize: vertical; }
-    .message-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .link-tools { width: 100%; }
-    .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 0; }
+    .landing-section .lines { text-align: center; }
+    .landing-section .status, .landing-section .error { text-align: center; }
+    .message-tools { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+    .message-tools form { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+    .message-tools textarea { width: min(420px, 100%); min-height: 70px; box-sizing: border-box; padding: 9px 10px; border: 1px solid #bbb; border-radius: 2px; resize: vertical; text-align: center; }
+    .message-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+    .link-tools { width: 100%; display: flex; flex-direction: column; align-items: center; }
+    .pin-settings form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 10px 0 0; }
     .link-tools .textbox { width: 120px; }
-    .secret-link-row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
-    .secret-link-details { flex: 1 1 auto; min-width: 0; }
-    .secret-link-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
+    .secret-link-row { width: 100%; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; }
+    .secret-link-details { width: 100%; min-width: 0; text-align: center; }
+    .secret-link-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; justify-content: center; }
     .secret-link-actions #rotate-form { margin: 0; }
-    .secret-url { display: block; width: 100%; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; }
+    .secret-url { display: block; width: 100%; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; color: #333; min-height: 1.5em; text-align: center; }
     .secret-url[aria-disabled="true"] { color: #777; pointer-events: none; text-decoration: none; }
-    .pin-settings { margin-top: 12px; }
+    .pin-settings { margin-top: 12px; text-align: center; }
     .pin-settings summary { cursor: pointer; display: inline-block; color: #555; font-size: 13px; }
     .pin-settings summary:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
-    .sms-tools { width: 100%; }
-    .sms-tools form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .sms-tools { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+    .sms-tools form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
     .sms-tools .textbox { width: min(220px, 74vw); }
     .sms-choice { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: #333; }
-    .sms-preview { width: 100%; font-size: 13px; color: #555; line-height: 1.45; }
-    .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-    .friends-tools { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+    .sms-preview { width: 100%; font-size: 13px; color: #555; line-height: 1.45; text-align: center; }
+    .location-tools { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .friends-tools { width: 100%; display: flex; flex-direction: column; gap: 12px; align-items: center; }
     .friends-tools form { margin: 0; }
-    .friend-add-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .friend-list { display: grid; gap: 8px; }
-    .friend-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px; }
+    .friend-add-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+    .friend-list { width: 100%; display: grid; gap: 8px; justify-items: center; text-align: center; }
+    .friend-row { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; border-top: 1px solid #eee; padding-top: 8px; text-align: center; }
     .friend-name { font-weight: 700; }
-    .friend-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .session-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .friend-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+    .session-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
     .session-actions form { margin: 0; }
-    @media (max-width: 520px) { .secret-link-row { flex-direction: column; align-items: stretch; } }
+    .session-choice { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: #333; }
     .muted { color: #777; font-size: 13px; }
     .admin { max-width: 960px; margin: 0 auto; padding: 24px; }
     .admin h1, .admin h2 { font-size: 20px; margin: 18px 0 10px; }
@@ -379,6 +382,10 @@ export function userLandingPage(data: {
             <button class="button" type="submit">Log Out</button>
           </form>
           <button class="button" type="button" onclick="leave()">Exit</button>
+          <label class="session-choice">
+            <input id="auto-exit-enabled" type="checkbox" checked>
+            Auto-exit after 1 minute
+          </label>
         </div>
       </div>
     </details>
@@ -396,12 +403,24 @@ const smsStatusBox = document.getElementById('sms-status');
 const personalMessageStatusBox = document.getElementById('personal-message-status');
 const passwordStatusBox = document.getElementById('password-status');
 const clearPasswordButton = document.getElementById('clear-user-password');
+const autoExitEnabled = document.getElementById('auto-exit-enabled');
+let autoExitTimer = null;
 function leave() {
   document.documentElement.innerHTML = '';
   try { history.replaceState(null, '', location.href); history.pushState(null, '', location.href); } catch {}
   location.replace(redirectUrl);
 }
-setTimeout(leave, 60000);
+function updateAutoExitTimer() {
+  if (autoExitTimer) {
+    clearTimeout(autoExitTimer);
+    autoExitTimer = null;
+  }
+  if (!autoExitEnabled || autoExitEnabled.checked) {
+    autoExitTimer = setTimeout(leave, 60000);
+  }
+}
+updateAutoExitTimer();
+if (autoExitEnabled) autoExitEnabled.addEventListener('change', updateAutoExitTimer);
 window.addEventListener('popstate', leave);
 function showResult(result) {
   statusBox.className = result.ok ? 'status' : 'error';

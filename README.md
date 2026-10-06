@@ -151,11 +151,11 @@ When a follower sees a user's current check-in for the first time, the app sends
 
 The Status and Seen section also lets a logged-in user save or clear a short personal message for followers. The current message is shown after the followed user's timestamp and location, and each follower can see that message only once. Saving a new message replaces the previous burner message and makes the new text available once to each follower.
 
-The landing page includes an expanded Friends section above Secret Link. A user can see users who currently follow them, revoke any follower's access, send a friend request by username, and approve or deny incoming requests. A requested user must approve before the requester can see their status, location, and burner messages.
+The landing page includes an expanded Friends section above Secret Link. A user can see users who currently follow them, revoke any follower's access, send a friend request by username, and approve or deny incoming requests. A requested user must approve before the requester can see their status, location, and burner messages. Approving a friend request automatically makes both users follow each other.
 
 The landing page includes an expanded Password section just above Logout/Exit. A user can set a custom password for the public Secret box; this password is stored only as a bcrypt hash. Clearing the custom password returns that user to the default local-date secret.
 
-The public check-in, admin login, secret-link PIN, and landing pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The landing page shall include an `Exit` button. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
+The public check-in, admin login, secret-link PIN, and landing pages shall automatically blank the screen and redirect to `https://www.google.co.uk/` after one minute. The landing page shall include an `Exit` button and a checked per-page option to disable the one-minute auto-exit for the current login only. Pressing `Exit` shall blank the screen, best-effort clear/prevent browser history back navigation, and redirect to `https://www.google.co.uk/`.
 
 ## Admin Page
 
