@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SSH_HOST: ssh.tlscheckin.org.uk
+  SSH_HOST: sshjhs.jahosi.co.uk
   SSH_USER: dockertunnel
 
 jobs:

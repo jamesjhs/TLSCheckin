@@ -203,7 +203,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SSH_HOST: ssh.tlscheckin.org.uk
+  SSH_HOST: sshjhs.jahosi.co.uk
   SSH_USER: dockertunnel
 
 jobs:
@@ -378,7 +378,13 @@ Cloudflare Tunnel public hostname routes can create the required DNS records aut
 
 Cloudflare's Tunnel docs describe this as mapping a public hostname to a local service URL. When you add the route in the dashboard, Cloudflare can create the DNS record pointing the hostname to the tunnel. Do not use `https://tlscheckin.org.uk` or `https://testing.tlscheckin.org.uk` as the Service URL; that would point the tunnel back to itself. Use the local Docker service/container address.
 
-If you also use Cloudflare Access for SSH, keep a separate SSH public hostname such as `ssh.tlscheckin.org.uk` that routes to:
+SSH for deployment is separate from the TLSCheckin public hostnames. This guide assumes GitHub Actions connects through:
+
+```text
+sshjhs.jahosi.co.uk
+```
+
+If you also use Cloudflare Access for SSH, keep that SSH public hostname routing to:
 
 ```text
 ssh://localhost:22
