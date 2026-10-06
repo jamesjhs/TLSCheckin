@@ -18,17 +18,8 @@ services:
       - ./persistent-data-${BRANCH_NAME:-main}:/app/data
 
     networks:
-      - proxy
-
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
-      - "traefik.http.routers.tlscheckin-${BRANCH_NAME:-main}.rule=Host(`${TLSCHECKIN_DOMAIN:?TLSCHECKIN_DOMAIN must be set}`)"
-      - "traefik.http.routers.tlscheckin-${BRANCH_NAME:-main}.entrypoints=websecure"
-      - "traefik.http.routers.tlscheckin-${BRANCH_NAME:-main}.tls=true"
-      - "traefik.http.routers.tlscheckin-${BRANCH_NAME:-main}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.services.tlscheckin-${BRANCH_NAME:-main}.loadbalancer.server.port=${PORT:?PORT must be set}"
+      - cloudflare-tunnel
 
 networks:
-  proxy:
+  cloudflare-tunnel:
     external: true
